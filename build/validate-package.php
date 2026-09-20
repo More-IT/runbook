@@ -67,6 +67,7 @@ $requiredFiles = [
 	'templates/main.php',
 	'templates/admin-settings.php',
 	'img/app.svg',
+	'img/app-dark.svg',
 	'l10n/en.json',
 	'l10n/en.js',
 	'l10n/pt_PT.json',

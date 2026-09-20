@@ -903,8 +903,16 @@ database schema change and no new migration were introduced.
 - **NUMBER step units:** the configured unit is shown in the step editor, run
   step card, response field and submitted response (for example `15 minutes`),
   and survives template snapshotting.
-- **Dark-theme navigation icon:** a dedicated theme-compatible white icon keeps
-  the Runbook logo visible in the main navigation on dark themes.
+- **Theme-aware app icons:** Runbook follows the Nextcloud Forms/Tables/Deck
+  convention. `app.svg` is the light (white) variant and is declared as
+  `<icon>app.svg</icon>`: the main navigation and the installed-apps list then
+  apply `background-invert-if-bright`, so the icon is white on the dark/coloured
+  header and dark on a light one. `app-dark.svg` is the dark (black) variant
+  used by Administration Settings and the Dashboard widget, which apply
+  `background-invert-if-dark` to turn it white in dark themes. Both SVGs share
+  the same geometry, declare an explicit `fill` on the root element and on every
+  path, and contain no internal CSS, classes or Illustrator metadata. The former
+  custom navigation icon was not a Nextcloud convention and was removed.
 - **My Work deep-link focus:** opening an item from "My Work" navigates to the
   matching run and step, scrolls to it and applies an accessible highlight,
   including after a reload.

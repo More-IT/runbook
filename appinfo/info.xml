@@ -56,7 +56,7 @@ Runbook is designed to be useful for IT, operations, HR, finance, quality, secur
         <navigation>
             <name>Runbook</name>
             <route>runbook.page.index</route>
-            <icon>app-nav.svg</icon>
+            <icon>app.svg</icon>
             <order>100</order>
         </navigation>
     </navigations>

@@ -44,11 +44,14 @@ class WidgetTest extends TestCase {
 		/** @var IL10N&MockObject $l10n */
 		$l10n = $this->createMock(IL10N::class);
 		$l10n->method('t')->willReturnCallback(function (string $text, array $parameters = []): string {
-			foreach ($parameters as $key => $value) {
-				$text = str_replace('{' . $key . '}', (string)$value, $text);
+			if ($parameters === []) {
+				return $text;
 			}
 
-			return $text;
+			// Nextcloud's IL10N::t() resolves sprintf placeholders with
+			// vsprintf(); the mock must do the same so a widget that passes
+			// JavaScript-style named placeholders is caught by the tests.
+			return vsprintf($text, $parameters);
 		});
 
 		/** @var IFactory&MockObject $factory */
@@ -58,7 +61,9 @@ class WidgetTest extends TestCase {
 		/** @var IURLGenerator&MockObject $url */
 		$url = $this->createMock(IURLGenerator::class);
 		$url->method('linkToRoute')->willReturn('/index.php/apps/runbook/');
-		$url->method('imagePath')->willReturn('/apps/runbook/img/app.svg');
+		$url->method('imagePath')->willReturnCallback(
+			static fn (string $app, string $file): string => '/apps/' . $app . '/img/' . $file,
+		);
 		$url->method('getAbsoluteURL')->willReturnCallback(static fn (string $path): string => 'https://cloud.example.com' . $path);
 
 		return new Widget($this->work, $this->adminSettings($dashboardEnabled), $url, $factory);
@@ -76,7 +81,7 @@ class WidgetTest extends TestCase {
 	/**
 	 * @return array{run: Run, section: RunSection, step: RunStep, overdue: bool, dueToday: bool}
 	 */
-	private function item(int $runId, string $stepTitle = 'Step', bool $overdue = false, bool $dueToday = false, ?int $dueAt = null): array {
+	private function item(int $runId, string $stepTitle = 'Step', bool $overdue = false, bool $dueToday = false, ?int $dueAt = null, string $runTitle = 'Run'): array {
 		$section = new RunSection();
 		$section->setId($runId);
 		$section->setRunId($runId);
@@ -87,7 +92,7 @@ class WidgetTest extends TestCase {
 		$step->setDueAt($dueAt);
 
 		return [
-			'run' => $this->makeRun($runId),
+			'run' => $this->makeRun($runId, $runTitle),
 			'section' => $section,
 			'step' => $step,
 			'overdue' => $overdue,
@@ -102,7 +107,7 @@ class WidgetTest extends TestCase {
 		self::assertSame('Runbook', $widget->getTitle());
 		self::assertGreaterThanOrEqual(0, $widget->getOrder());
 		self::assertSame('/index.php/apps/runbook/#/my-work', $widget->getUrl());
-		self::assertStringStartsWith('https://cloud.example.com', $widget->getIconUrl());
+		self::assertSame('https://cloud.example.com/apps/runbook/img/app-dark.svg', $widget->getIconUrl());
 	}
 
 	public function testItemsAreBoundedAndUsesProvidedUser(): void {
@@ -132,6 +137,81 @@ class WidgetTest extends TestCase {
 
 		// The summary is the "half empty" message rendered above the list.
 		self::assertSame('4 active, 2 overdue, 2 due today', $result->getHalfEmptyContentMessage());
+	}
+
+	public function testSummaryInterpolatesCounts(): void {
+		$this->work->method('myWorkForUser')->willReturn([
+			$this->item(1, 'A', true, false),
+			$this->item(2, 'B', true, false),
+			$this->item(3, 'C', false, true),
+		]);
+
+		$result = $this->widget()->getItemsV2('bob', null, 7);
+
+		self::assertSame('3 active, 2 overdue, 1 due today', $result->getHalfEmptyContentMessage());
+	}
+
+	public function testSubtitleUsesActualRunTitle(): void {
+		$dueAt = 1893456000; // 2030-01-01
+		$this->work->method('myWorkForUser')->willReturn([
+			$this->item(1, 'Deploy', false, false, $dueAt, 'Production release'),
+		]);
+
+		$result = $this->widget()->getItemsV2('bob', null, 7);
+
+		/** @var WidgetItem $item */
+		$item = $result->getItems()[0];
+		self::assertSame('Production release · Due ' . date('Y-m-d', $dueAt), $item->getSubtitle());
+	}
+
+	public function testOverdueSubtitle(): void {
+		$this->work->method('myWorkForUser')->willReturn([
+			$this->item(1, 'Deploy', true, false, 1700000000, 'Production release'),
+		]);
+
+		$result = $this->widget()->getItemsV2('bob', null, 7);
+
+		/** @var WidgetItem $item */
+		$item = $result->getItems()[0];
+		self::assertSame('Production release · Overdue', $item->getSubtitle());
+	}
+
+	public function testDueTodaySubtitle(): void {
+		$this->work->method('myWorkForUser')->willReturn([
+			$this->item(1, 'Deploy', false, true, 1700000100, 'Production release'),
+		]);
+
+		$result = $this->widget()->getItemsV2('bob', null, 7);
+
+		/** @var WidgetItem $item */
+		$item = $result->getItems()[0];
+		self::assertSame('Production release · Due today', $item->getSubtitle());
+	}
+
+	public function testNoLiteralPlaceholdersRemain(): void {
+		$this->work->method('myWorkForUser')->willReturn([
+			$this->item(1, 'Overdue step', true, false, 1700000000, 'Alpha'),
+			$this->item(2, 'Today step', false, true, 1700000100, 'Beta'),
+			$this->item(3, 'Dated step', false, false, 1893456000, 'Gamma'),
+			$this->item(4, 'No date step', false, false, null, 'Delta'),
+		]);
+
+		$result = $this->widget()->getItemsV2('bob', null, 7);
+
+		$texts = [
+			$result->getHalfEmptyContentMessage(),
+			$result->getEmptyContentMessage(),
+		];
+		foreach ($result->getItems() as $item) {
+			$texts[] = $item->getTitle();
+			$texts[] = $item->getSubtitle();
+		}
+
+		foreach ($texts as $text) {
+			foreach (['{active}', '{overdue}', '{dueToday}', '{run}', '{date}', '%1$', '%2$', '%3$'] as $placeholder) {
+				self::assertStringNotContainsString($placeholder, $text, 'Unresolved placeholder in: ' . $text);
+			}
+		}
 	}
 
 	public function testEmptyMessageIsNotShownWhenWorkExists(): void {

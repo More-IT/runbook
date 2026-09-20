@@ -23,13 +23,13 @@ class SectionTest extends TestCase {
 
 		/** @var IURLGenerator&MockObject $url */
 		$url = $this->createMock(IURLGenerator::class);
-		$url->method('imagePath')->willReturn('/apps/runbook/img/app.svg');
+		$url->method('imagePath')->willReturn('/apps/runbook/img/app-dark.svg');
 
 		$section = new Section($factory, $url);
 
 		self::assertSame('runbook', $section->getID());
 		self::assertSame('Runbook', $section->getName());
 		self::assertSame(50, $section->getPriority());
-		self::assertSame('/apps/runbook/img/app.svg', $section->getIcon());
+		self::assertSame('/apps/runbook/img/app-dark.svg', $section->getIcon());
 	}
 }

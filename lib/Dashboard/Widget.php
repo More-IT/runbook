@@ -52,7 +52,9 @@ class Widget implements IAPIWidgetV2, IButtonWidget, IIconWidget, IOptionWidget 
 	}
 
 	public function getIconUrl(): string {
-		return $this->url->getAbsoluteURL($this->url->imagePath('runbook', 'app.svg'));
+		// The Dashboard renders widget icons on the main background and applies
+		// the theme-aware invert filter, so the dark icon variant is expected.
+		return $this->url->getAbsoluteURL($this->url->imagePath('runbook', 'app-dark.svg'));
 	}
 
 	public function getUrl(): ?string {
@@ -102,10 +104,10 @@ class Widget implements IAPIWidgetV2, IButtonWidget, IIconWidget, IOptionWidget 
 		return new WidgetItems(
 			$items,
 			$this->l10n()->t('No assigned work right now.'),
-			$this->l10n()->t('{active} active, {overdue} overdue, {dueToday} due today', [
-				'active' => count($work),
-				'overdue' => $overdue,
-				'dueToday' => $dueToday,
+			$this->l10n()->t('%1$d active, %2$d overdue, %3$d due today', [
+				count($work),
+				$overdue,
+				$dueToday,
 			]),
 		);
 	}
@@ -126,16 +128,13 @@ class Widget implements IAPIWidgetV2, IButtonWidget, IIconWidget, IOptionWidget 
 
 	private function subtitle(string $runTitle, ?int $dueAt, bool $overdue, bool $dueToday): string {
 		if ($overdue) {
-			return $this->l10n()->t('{run} · Overdue', ['run' => $runTitle]);
+			return $this->l10n()->t('%1$s · Overdue', [$runTitle]);
 		}
 		if ($dueToday) {
-			return $this->l10n()->t('{run} · Due today', ['run' => $runTitle]);
+			return $this->l10n()->t('%1$s · Due today', [$runTitle]);
 		}
 		if ($dueAt !== null) {
-			return $this->l10n()->t('{run} · Due {date}', [
-				'run' => $runTitle,
-				'date' => date('Y-m-d', $dueAt),
-			]);
+			return $this->l10n()->t('%1$s · Due %2$s', [$runTitle, date('Y-m-d', $dueAt)]);
 		}
 
 		return $runTitle;

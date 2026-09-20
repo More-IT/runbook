@@ -1,13 +1,13 @@
 {
   "translations": {
-    "{active} active, {overdue} overdue, {dueToday} due today": "{active} ativos, {overdue} em atraso, {dueToday} com prazo hoje",
+    "%1$d active, %2$d overdue, %3$d due today": "%1$d ativos, %2$d em atraso, %3$d com prazo hoje",
+    "%1$s · Due %2$s": "%1$s · Prazo %2$s",
+    "%1$s · Due today": "%1$s · Prazo hoje",
+    "%1$s · Overdue": "%1$s · Em atraso",
     "{actor} mentioned you in a comment in run \"{run}\".": "{actor} mencionou-te num comentário da execução \"{run}\".",
     "{actor} mentioned you in a comment on step \"{step}\" in run \"{run}\".": "{actor} mencionou-te num comentário do passo \"{step}\" da execução \"{run}\".",
     "{count} skipped": "{count} ignorados",
     "{resolved} of {total} steps resolved": "{resolved} de {total} passos resolvidos",
-    "{run} · Due {date}": "{run} · Prazo {date}",
-    "{run} · Due today": "{run} · Prazo hoje",
-    "{run} · Overdue": "{run} · Em atraso",
     "{type} · {date}": "{type} · {date}",
     "{type} · {date} · {description}": "{type} · {date} · {description}",
     "A boolean setting has an invalid value.": "Uma definição booleana tem um valor inválido.",

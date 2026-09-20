@@ -320,7 +320,7 @@ abstract class RunTestBase extends TestCase {
 		$this->urlGenerator = $this->createMock(IURLGenerator::class);
 		$this->urlGenerator->method('linkToRoute')->willReturn('/index.php/apps/runbook/');
 		$this->urlGenerator->method('linkToRouteAbsolute')->willReturn('https://cloud.example.com/index.php/apps/runbook/');
-		$this->urlGenerator->method('imagePath')->willReturn('/apps/runbook/img/app.svg');
+		$this->urlGenerator->method('imagePath')->willReturn('/apps/runbook/img/app-dark.svg');
 		$this->urlGenerator->method('getAbsoluteURL')->willReturnCallback(
 			static fn (string $url): string => 'https://cloud.example.com' . $url,
 		);

@@ -32,7 +32,9 @@ class Section implements IIconSection {
 	}
 
 	public function getIcon(): string {
-		return $this->url->imagePath('runbook', 'app.svg');
+		// Nextcloud renders settings section icons on the main background and
+		// inverts them in dark themes, so the dark icon variant is expected.
+		return $this->url->imagePath('runbook', 'app-dark.svg');
 	}
 
 	private function l10n(): IL10N {

@@ -1,13 +1,13 @@
 {
   "translations": {
-    "{active} active, {overdue} overdue, {dueToday} due today": "{active} active, {overdue} overdue, {dueToday} due today",
+    "%1$d active, %2$d overdue, %3$d due today": "%1$d active, %2$d overdue, %3$d due today",
+    "%1$s · Due %2$s": "%1$s · Due %2$s",
+    "%1$s · Due today": "%1$s · Due today",
+    "%1$s · Overdue": "%1$s · Overdue",
     "{actor} mentioned you in a comment in run \"{run}\".": "{actor} mentioned you in a comment in run \"{run}\".",
     "{actor} mentioned you in a comment on step \"{step}\" in run \"{run}\".": "{actor} mentioned you in a comment on step \"{step}\" in run \"{run}\".",
     "{count} skipped": "{count} skipped",
     "{resolved} of {total} steps resolved": "{resolved} of {total} steps resolved",
-    "{run} · Due {date}": "{run} · Due {date}",
-    "{run} · Due today": "{run} · Due today",
-    "{run} · Overdue": "{run} · Overdue",
     "{type} · {date}": "{type} · {date}",
     "{type} · {date} · {description}": "{type} · {date} · {description}",
     "A boolean setting has an invalid value.": "A boolean setting has an invalid value.",
