@@ -19,7 +19,7 @@ declare(strict_types=1);
 $options = parseOptions($argv);
 $isPackage = isset($options['package']);
 $root = $isPackage ? rtrim($options['package'], "/\\") : dirname(__DIR__);
-$expectedVersion = $options['version'] ?? '0.1.1';
+$expectedVersion = $options['version'] ?? '0.2.0';
 
 $errors = [];
 $notes = [];

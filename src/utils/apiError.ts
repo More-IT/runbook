@@ -16,6 +16,7 @@ const REASON_MESSAGES: Record<string, string> = {
 	title_required: t('runbook', 'A title is required.'),
 	title_too_long: t('runbook', 'The title is too long.'),
 	description_too_long: t('runbook', 'The description is too long.'),
+	notes_too_long: t('runbook', 'The notes are too long.'),
 	section_title_required: t('runbook', 'A section needs a title.'),
 	step_title_required: t('runbook', 'A step needs a title.'),
 	invalid_step_type: t('runbook', 'The selected step type is not supported.'),

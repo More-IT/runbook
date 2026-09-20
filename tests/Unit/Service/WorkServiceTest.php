@@ -104,6 +104,21 @@ class WorkServiceTest extends RunTestBase {
 		self::assertSame([], $this->workServiceFor('bob')->myWork('all'));
 	}
 
+	public function testSkippedStepIsResolvedButNotActiveWork(): void {
+		$this->addUser('alice');
+		$this->addUser('bob');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$skipped = $this->addRunStep($section->getId(), 'CHECK', true, RunStepStatus::Skipped->value, 0, [], PrincipalType::User->value, 'bob');
+
+		$all = $this->workServiceFor('bob')->myWork('all');
+		$completed = $this->workServiceFor('bob')->myWork('completed');
+
+		self::assertSame([], $all, 'Skipped steps must not count as active work');
+		self::assertCount(1, $completed);
+		self::assertSame($skipped->getId(), $completed[0]['step']->getId());
+	}
+
 	public function testInvalidFilterIsRejected(): void {
 		$this->addUser('bob');
 

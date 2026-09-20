@@ -16,6 +16,8 @@ use OCP\DB\Types;
  * @method void setSourceSectionId(?int $sourceSectionId)
  * @method string getTitle()
  * @method string getDescription()
+ * @method string getNotes()
+ * @method void setNotes(?string $notes)
  * @method int getPosition()
  * @method void setPosition(int $position)
  *
@@ -25,6 +27,7 @@ use OCP\DB\Types;
  *     sourceSectionId: int|null,
  *     title: string,
  *     description: string,
+ *     notes: string,
  *     position: int
  * }
  */
@@ -33,6 +36,7 @@ class RunSection extends Entity {
 	protected ?int $sourceSectionId = null;
 	protected string $title = '';
 	protected string $description = '';
+	protected ?string $notes = null;
 	protected int $position = 0;
 
 	public function __construct() {
@@ -40,6 +44,7 @@ class RunSection extends Entity {
 		$this->addType('sourceSectionId', Types::BIGINT);
 		$this->addType('title', Types::STRING);
 		$this->addType('description', Types::TEXT);
+		$this->addType('notes', Types::TEXT);
 		$this->addType('position', Types::INTEGER);
 	}
 
@@ -62,6 +67,19 @@ class RunSection extends Entity {
 	}
 
 	/**
+	 * Notes are optional free text. A null database value reads as an empty
+	 * string so the API is always stable.
+	 */
+	public function getNotes(): string {
+		return $this->notes ?? '';
+	}
+
+	public function setNotes(?string $notes): void {
+		$this->notes = $notes;
+		$this->markFieldUpdated('notes');
+	}
+
+	/**
 	 * @return RunSectionData
 	 */
 	public function toArray(): array {
@@ -71,6 +89,7 @@ class RunSection extends Entity {
 			'sourceSectionId' => $this->sourceSectionId,
 			'title' => $this->title,
 			'description' => $this->description,
+			'notes' => $this->getNotes(),
 			'position' => $this->position,
 		];
 	}

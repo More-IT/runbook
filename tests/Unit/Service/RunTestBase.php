@@ -570,6 +570,11 @@ abstract class RunTestBase extends TestCase {
 
 			return $section;
 		});
+		$this->runSectionMapper->method('update')->willReturnCallback(function (RunSection $section): RunSection {
+			$this->runSections[$section->getId()] = $section;
+
+			return $section;
+		});
 		$this->runSectionMapper->method('find')->willReturnCallback(function (int $id): RunSection {
 			if (!isset($this->runSections[$id])) {
 				throw new DoesNotExistException('run section not found');

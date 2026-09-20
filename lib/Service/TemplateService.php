@@ -28,6 +28,7 @@ use OCP\Security\ISecureRandom;
 class TemplateService {
 	private const MAX_TITLE_LENGTH = 255;
 	private const MAX_DESCRIPTION_LENGTH = 10000;
+	private const MAX_NOTES_LENGTH = 10000;
 	private const MAX_ASSIGNEE_LENGTH = 255;
 	private const MAX_DUE_OFFSET_MINUTES = 525600;
 	private const MAX_CONFIG_LENGTH = 60000;
@@ -210,11 +211,13 @@ class TemplateService {
 
 		$title = $this->normalizeTitle($this->requireString($data, 'title', 'section_title_required'));
 		$description = $this->normalizeDescription($this->readString($data, 'description') ?? '');
+		$notes = $this->normalizeNotes($this->readString($data, 'notes') ?? '');
 
 		$section = new TemplateSection();
 		$section->setTemplateId($templateId);
 		$section->setTitle($title);
 		$section->setDescription($description);
+		$section->setNotes($notes);
 		$section->setPosition(count($this->sections->findByTemplate($templateId)));
 
 		$section = $this->sections->insert($section);
@@ -247,6 +250,15 @@ class TemplateService {
 			$description = $this->normalizeDescription($description);
 			if ($description !== $section->getDescription()) {
 				$section->setDescription($description);
+				$changed = true;
+			}
+		}
+
+		$notes = $this->readString($data, 'notes');
+		if ($notes !== null) {
+			$notes = $this->normalizeNotes($notes);
+			if ($notes !== $section->getNotes()) {
+				$section->setNotes($notes);
 				$changed = true;
 			}
 		}
@@ -649,6 +661,14 @@ class TemplateService {
 		}
 
 		return $description;
+	}
+
+	private function normalizeNotes(string $notes): string {
+		if (mb_strlen($notes) > self::MAX_NOTES_LENGTH) {
+			throw new ValidationException('notes_too_long');
+		}
+
+		return $notes;
 	}
 
 	private function normalizeAssignee(?string $assignee): ?string {

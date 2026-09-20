@@ -71,8 +71,10 @@ class RunStepService {
 			|| array_key_exists('dueAt', $data);
 		$hasResponse = array_key_exists('response', $data);
 
+		$previousAssignee = null;
 		if ($hasAssignment) {
 			[$run, $step] = $this->requireStepForAssignment($stepId);
+			$previousAssignee = $step->getAssigneeId();
 			$this->applyAssignment($run, $step, $data);
 		} else {
 			[$run, $step] = $this->requireStepForExecution($stepId);
@@ -92,7 +94,10 @@ class RunStepService {
 		$this->touchRun($run);
 
 		if ($hasAssignment) {
-			$this->activity->record($run->getId(), $step->getId(), ActivityType::StepAssignmentChanged, [], $this->currentUserId());
+			$this->activity->record($run->getId(), $step->getId(), ActivityType::StepAssignmentChanged, [
+				'previous' => $previousAssignee,
+				'new' => $step->getAssigneeId(),
+			], $this->currentUserId());
 			if ($step->getAssigneeType() !== null && $step->getAssigneeId() !== null) {
 				$this->notifications->notifyStepAssigned($run, $step, $this->currentUserId());
 			}

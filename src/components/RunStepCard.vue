@@ -84,6 +84,28 @@ const canComplete = computed<boolean>(() => props.step.type !== 'FILE' || !props
 const isOverdue = computed<boolean>(() => isEditable.value && props.step.dueAt !== null && props.step.dueAt < Date.now() / 1000)
 
 /**
+ * Status class used for the theme-safe visual treatment.
+ *
+ * A step that was reopened and is actionable again is highlighted separately
+ * (orange) because "reopened" is not a persisted status on its own.
+ */
+const statusClass = computed<string>(() => {
+	if (props.step.reopenedAt !== null && (props.step.status === 'PENDING' || props.step.status === 'IN_PROGRESS')) {
+		return 'runbook-run-step--reopened'
+	}
+	switch (props.step.status) {
+		case 'COMPLETED':
+			return 'runbook-run-step--completed'
+		case 'IN_PROGRESS':
+			return 'runbook-run-step--in-progress'
+		case 'SKIPPED':
+			return 'runbook-run-step--skipped'
+		default:
+			return 'runbook-run-step--pending'
+	}
+})
+
+/**
  * Human readable label for a step type.
  *
  * @param type Step type.
@@ -333,7 +355,7 @@ function submitAssignment(): void {
 </script>
 
 <template>
-	<div class="runbook-run-step">
+	<div class="runbook-run-step" :class="statusClass">
 		<div class="runbook-run-step__header">
 			<span class="runbook-run-step__title">{{ step.title }}</span>
 			<span class="runbook-run-step__type">{{ typeLabel(step.type) }}</span>
@@ -485,9 +507,57 @@ function submitAssignment(): void {
 <style scoped>
 .runbook-run-step {
 	border: 1px solid var(--color-border, #ededed);
+	border-inline-start-width: 4px;
 	border-radius: var(--border-radius, 4px);
 	padding: 8px;
 	margin-bottom: 8px;
+}
+
+/* Theme-safe status accents. Element colors are provided by Nextcloud for
+ * both light and dark themes; the fallbacks keep the treatment readable. */
+.runbook-run-step--completed {
+	border-inline-start-color: var(--color-success-element, #099f05);
+}
+
+.runbook-run-step--pending {
+	border-inline-start-color: var(--color-info-element, #0077c7);
+}
+
+.runbook-run-step--in-progress {
+	border-inline-start-color: var(--color-error-element, #c90000);
+}
+
+.runbook-run-step--skipped {
+	border-inline-start-color: var(--color-warning-element, #bf7900);
+}
+
+.runbook-run-step--reopened {
+	border-inline-start-color: color-mix(in srgb, var(--color-warning-element, #bf7900) 55%, var(--color-error-element, #c90000));
+}
+
+.runbook-run-step--completed .runbook-run-step__status {
+	color: var(--color-success-element, #099f05);
+	font-weight: bold;
+}
+
+.runbook-run-step--pending .runbook-run-step__status {
+	color: var(--color-info-element, #0077c7);
+	font-weight: bold;
+}
+
+.runbook-run-step--in-progress .runbook-run-step__status {
+	color: var(--color-error-element, #c90000);
+	font-weight: bold;
+}
+
+.runbook-run-step--skipped .runbook-run-step__status {
+	color: var(--color-warning-element, #bf7900);
+	font-weight: bold;
+}
+
+.runbook-run-step--reopened .runbook-run-step__status {
+	color: color-mix(in srgb, var(--color-warning-element, #bf7900) 55%, var(--color-error-element, #c90000));
+	font-weight: bold;
 }
 
 .runbook-run-step__header {

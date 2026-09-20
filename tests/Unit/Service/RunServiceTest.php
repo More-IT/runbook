@@ -170,6 +170,68 @@ class RunServiceTest extends RunTestBase {
 		self::assertTrue($progress['canComplete']);
 	}
 
+	public function testProgressForEmptyRunIsComplete(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+
+		$progress = $this->runServiceFor('alice')->getRunDetail($run->getId())['progress'];
+
+		self::assertSame(0, $progress['total']);
+		self::assertSame(0, $progress['pending']);
+		self::assertSame(100, $progress['percentage']);
+		self::assertTrue($progress['canComplete']);
+	}
+
+	public function testProgressCountsSkippedAsResolvedNotPending(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$this->addRunStep($section->getId(), 'CHECK', true, RunStepStatus::Completed->value, 0);
+		$this->addRunStep($section->getId(), 'CHECK', true, RunStepStatus::Skipped->value, 1);
+		$this->addRunStep($section->getId(), 'CHECK', true, RunStepStatus::Skipped->value, 2);
+		$this->addRunStep($section->getId(), 'CHECK', true, RunStepStatus::Pending->value, 3);
+
+		$progress = $this->runServiceFor('alice')->getRunDetail($run->getId())['progress'];
+
+		self::assertSame(4, $progress['total']);
+		self::assertSame(1, $progress['completed']);
+		self::assertSame(2, $progress['skipped']);
+		self::assertSame(1, $progress['pending']);
+		self::assertSame(75, $progress['percentage']);
+		// A required pending step blocks completion; skipped required steps do not.
+		self::assertFalse($progress['canComplete']);
+	}
+
+	public function testProgressAllSkippedIsFullyResolved(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$this->addRunStep($section->getId(), 'CHECK', true, RunStepStatus::Skipped->value, 0);
+		$this->addRunStep($section->getId(), 'TEXT', false, RunStepStatus::Skipped->value, 1);
+
+		$progress = $this->runServiceFor('alice')->getRunDetail($run->getId())['progress'];
+
+		self::assertSame(2, $progress['skipped']);
+		self::assertSame(0, $progress['pending']);
+		self::assertSame(100, $progress['percentage']);
+		self::assertTrue($progress['canComplete']);
+	}
+
+	public function testProgressAllCompletedIsFullyResolved(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$this->addRunStep($section->getId(), 'CHECK', true, RunStepStatus::Completed->value, 0);
+		$this->addRunStep($section->getId(), 'TEXT', false, RunStepStatus::Completed->value, 1);
+
+		$progress = $this->runServiceFor('alice')->getRunDetail($run->getId())['progress'];
+
+		self::assertSame(2, $progress['completed']);
+		self::assertSame(0, $progress['pending']);
+		self::assertSame(100, $progress['percentage']);
+		self::assertTrue($progress['canComplete']);
+	}
+
 	public function testCompleteRunRejectsUnresolvedRequiredSteps(): void {
 		$this->addUser('alice');
 		$run = $this->addRun('alice');
@@ -381,6 +443,72 @@ class RunServiceTest extends RunTestBase {
 
 		$runStep = array_values($this->runSteps)[0];
 		self::assertSame([], $runStep->getConfigArray());
+	}
+
+	public function testStartRunSnapshotCopiesSectionNotes(): void {
+		$this->addUser('alice');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$section->setNotes('Bring the spare key.');
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Run']);
+
+		$runSection = array_values($this->runSections)[0];
+		self::assertSame('Bring the spare key.', $runSection->getNotes());
+	}
+
+	public function testUpdateSectionNotesByOwner(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+
+		$updated = $this->runServiceFor('alice')->updateSectionNotes($section->getId(), ['notes' => 'Handover at 18:00']);
+
+		self::assertSame('Handover at 18:00', $updated->getNotes());
+	}
+
+	public function testUpdateSectionNotesRecordsActivity(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+
+		$this->runServiceFor('alice')->updateSectionNotes($section->getId(), ['notes' => 'Note']);
+
+		$events = array_values(array_filter(
+			$this->activityEvents,
+			static fn (ActivityEvent $event): bool => $event->getEventType() === ActivityType::SectionNotesUpdated->value,
+		));
+		self::assertCount(1, $events);
+		self::assertSame($section->getId(), $events[0]->getMetadataArray()['sectionId']);
+	}
+
+	public function testUpdateSectionNotesRejectedForNonOwner(): void {
+		$this->addUser('alice');
+		$this->addUser('bob');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+
+		$this->expectException(NotFoundException::class);
+		$this->runServiceFor('bob')->updateSectionNotes($section->getId(), ['notes' => 'x']);
+	}
+
+	public function testUpdateSectionNotesRejectedWhenRunNotActive(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice', RunStatus::Completed->value);
+		$section = $this->addRunSection($run->getId(), 0);
+
+		$this->expectException(ConflictException::class);
+		$this->runServiceFor('alice')->updateSectionNotes($section->getId(), ['notes' => 'x']);
+	}
+
+	public function testUpdateSectionNotesTooLong(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+
+		$this->expectException(ValidationException::class);
+		$this->runServiceFor('alice')->updateSectionNotes($section->getId(), ['notes' => str_repeat('a', 10001)]);
 	}
 
 	public function testStartRunIgnoresInvalidLegacyDueOffset(): void {

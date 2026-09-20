@@ -42,6 +42,8 @@ return [
 		['name' => 'run_step#skip', 'url' => '/api/v1/run-steps/{id}/skip', 'verb' => 'POST'],
 		['name' => 'run_step#reopen', 'url' => '/api/v1/run-steps/{id}/reopen', 'verb' => 'POST'],
 
+		['name' => 'run_section#update', 'url' => '/api/v1/run-sections/{id}', 'verb' => 'PATCH'],
+
 		['name' => 'run_acl#index', 'url' => '/api/v1/runs/{id}/acl', 'verb' => 'GET'],
 		['name' => 'run_acl#update', 'url' => '/api/v1/runs/{id}/acl', 'verb' => 'PUT'],
 

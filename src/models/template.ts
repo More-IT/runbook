@@ -59,6 +59,7 @@ export interface TemplateSection {
 	templateId: number
 	title: string
 	description: string
+	notes: string
 	position: number
 }
 
@@ -131,6 +132,7 @@ export interface TemplatePayload {
 export interface SectionPayload {
 	title?: string
 	description?: string
+	notes?: string
 }
 
 export interface StepPayload {

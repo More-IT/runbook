@@ -15,6 +15,7 @@ import type {
 	RunCommentItem,
 	RunDetail,
 	RunListItem,
+	RunSection,
 	RunStep,
 	StartRunPayload,
 	StepAssignmentPayload,
@@ -167,6 +168,18 @@ export async function assignStep(id: number, assignment: StepAssignmentPayload):
 	const { data } = await axios.patch<{ step: RunStep }>(endpoint(`/run-steps/${id}`), assignment)
 
 	return data.step
+}
+
+/**
+ * Update the notes of a run section.
+ *
+ * @param sectionId Run section identifier.
+ * @param notes New notes value.
+ */
+export async function updateRunSectionNotes(sectionId: number, notes: string): Promise<RunSection> {
+	const { data } = await axios.patch<{ section: RunSection }>(endpoint(`/run-sections/${sectionId}`), { notes })
+
+	return data.section
 }
 
 /**

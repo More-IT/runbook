@@ -34,17 +34,19 @@ const emit = defineEmits<{
 
 const title = ref(props.section.title)
 const description = ref(props.section.description)
+const notes = ref(props.section.notes)
 
 watch(() => props.section, () => {
 	title.value = props.section.title
 	description.value = props.section.description
+	notes.value = props.section.notes
 }, { deep: true })
 
 /**
  * Emit the current section fields for saving.
  */
 function submit(): void {
-	emit('save', { title: title.value, description: description.value })
+	emit('save', { title: title.value, description: description.value, notes: notes.value })
 }
 </script>
 
@@ -74,6 +76,8 @@ function submit(): void {
 		</header>
 
 		<NcTextArea v-model="description" :label="t('runbook', 'Section description')" />
+
+		<NcTextArea v-model="notes" :label="t('runbook', 'Section notes')" />
 
 		<div class="runbook-section__save">
 			<NcButton :disabled="busy" @click="submit">

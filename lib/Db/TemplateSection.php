@@ -12,6 +12,8 @@ use OCP\DB\Types;
  * @method void setTemplateId(int $templateId)
  * @method string getTitle()
  * @method string getDescription()
+ * @method string getNotes()
+ * @method void setNotes(?string $notes)
  * @method int getPosition()
  * @method void setPosition(int $position)
  *
@@ -20,6 +22,7 @@ use OCP\DB\Types;
  *     templateId: int,
  *     title: string,
  *     description: string,
+ *     notes: string,
  *     position: int
  * }
  */
@@ -27,12 +30,14 @@ class TemplateSection extends Entity {
 	protected int $templateId = 0;
 	protected string $title = '';
 	protected string $description = '';
+	protected ?string $notes = null;
 	protected int $position = 0;
 
 	public function __construct() {
 		$this->addType('templateId', Types::BIGINT);
 		$this->addType('title', Types::STRING);
 		$this->addType('description', Types::TEXT);
+		$this->addType('notes', Types::TEXT);
 		$this->addType('position', Types::INTEGER);
 	}
 
@@ -55,6 +60,19 @@ class TemplateSection extends Entity {
 	}
 
 	/**
+	 * Notes are optional free text. A null database value reads as an empty
+	 * string so the API is always stable.
+	 */
+	public function getNotes(): string {
+		return $this->notes ?? '';
+	}
+
+	public function setNotes(?string $notes): void {
+		$this->notes = $notes;
+		$this->markFieldUpdated('notes');
+	}
+
+	/**
 	 * @return SectionData
 	 */
 	public function toArray(): array {
@@ -63,6 +81,7 @@ class TemplateSection extends Entity {
 			'templateId' => $this->templateId,
 			'title' => $this->title,
 			'description' => $this->description,
+			'notes' => $this->getNotes(),
 			'position' => $this->position,
 		];
 	}

@@ -419,6 +419,31 @@ class TemplateServiceTest extends TestCase {
 		self::assertSame(36, strlen($step->getUuid()));
 	}
 
+	public function testSectionNotesArePersistedAndUpdated(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+
+		$section = $service->createSection($template->getId(), [
+			'title' => 'Preparation',
+			'notes' => 'Call the on-call engineer.',
+		]);
+		self::assertSame('Call the on-call engineer.', $section->getNotes());
+
+		$updated = $service->updateSection($section->getId(), ['notes' => 'Escalate to the platform team.']);
+		self::assertSame('Escalate to the platform team.', $updated->getNotes());
+	}
+
+	public function testSectionNotesTooLongIsRejected(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+
+		$this->expectException(ValidationException::class);
+		$service->createSection($template->getId(), [
+			'title' => 'Preparation',
+			'notes' => str_repeat('a', 10001),
+		]);
+	}
+
 	public function testSectionPositionsAreNormalizedAfterDelete(): void {
 		$service = $this->serviceFor('alice');
 		$template = $service->createTemplate(['title' => 'Deploy']);

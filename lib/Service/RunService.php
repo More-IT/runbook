@@ -37,6 +37,7 @@ use OCP\Security\ISecureRandom;
 class RunService {
 	private const MAX_TITLE_LENGTH = 255;
 	private const MAX_DESCRIPTION_LENGTH = 10000;
+	private const MAX_SECTION_NOTES_LENGTH = 10000;
 
 	public function __construct(
 		private readonly TemplateMapper $templates,
@@ -140,6 +141,7 @@ class RunService {
 				$runSection->setSourceSectionId($section->getId());
 				$runSection->setTitle($section->getTitle());
 				$runSection->setDescription($section->getDescription());
+				$runSection->setNotes($section->getNotes());
 				$runSection->setPosition($section->getPosition());
 				$storedSection = $this->runSections->insert($runSection);
 
@@ -345,6 +347,53 @@ class RunService {
 			'canComment' => $isActive && $this->access->canComment($run, $uid),
 			'executableStepIds' => $this->access->executableStepIds($run, $steps, $uid),
 		];
+	}
+
+	/**
+	 * Update the notes of a run section.
+	 *
+	 * Only the run owner may change section notes and only while the run is
+	 * active. The run snapshot stays authoritative: this changes the run's own
+	 * copy of the notes, never the source template.
+	 *
+	 * @param array<string, mixed> $data
+	 */
+	public function updateSectionNotes(int $sectionId, array $data): RunSection {
+		try {
+			$section = $this->runSections->find($sectionId);
+		} catch (DoesNotExistException) {
+			throw new NotFoundException('run_section_not_found');
+		}
+
+		$run = $this->requireOwnedRun($section->getRunId());
+		if ($run->getStatus() !== RunStatus::Active->value) {
+			throw new ConflictException('run_not_active');
+		}
+
+		$notes = $data['notes'] ?? null;
+		if (!is_string($notes)) {
+			throw new ValidationException('invalid_field');
+		}
+		if (mb_strlen($notes) > self::MAX_SECTION_NOTES_LENGTH) {
+			throw new ValidationException('notes_too_long');
+		}
+
+		if ($notes === $section->getNotes()) {
+			return $section;
+		}
+
+		$section->setNotes($notes);
+		$section = $this->runSections->update($section);
+
+		// Notes content is deliberately not persisted in the activity log;
+		// only the affected section and whether notes are present are recorded.
+		$this->activity->record($run->getId(), null, ActivityType::SectionNotesUpdated, [
+			'sectionId' => $section->getId(),
+			'sectionTitle' => $section->getTitle(),
+			'hasNotes' => $notes !== '',
+		], $this->currentUserId());
+
+		return $section;
 	}
 
 	public function completeRun(int $id): Run {

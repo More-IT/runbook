@@ -10,6 +10,7 @@ use OCA\Runbook\Migration\Version0003Date20260301000000;
 use OCA\Runbook\Migration\Version0004Date20260401000000;
 use OCA\Runbook\Migration\Version0005Date20260501000000;
 use OCA\Runbook\Migration\Version0006Date20260601000000;
+use OCA\Runbook\Migration\Version0007Date20260701000000;
 use OCA\Runbook\Tests\Support\FakeSchemaWrapper;
 use OCA\Runbook\Tests\Support\FakeTable;
 use OCP\DB\ISchemaWrapper;
@@ -36,6 +37,7 @@ class MigrationSchemaTest extends TestCase {
 		Version0004Date20260401000000::class,
 		Version0005Date20260501000000::class,
 		Version0006Date20260601000000::class,
+		Version0007Date20260701000000::class,
 	];
 
 	/** @var IOutput&MockObject */
@@ -215,6 +217,19 @@ class MigrationSchemaTest extends TestCase {
 		self::assertArrayHasKey('runbook_run_acl_principal_uniq', $runAcl->recordedUniqueIndexes());
 	}
 
+	public function testSectionNotesColumnsAreNullable(): void {
+		$schema = new FakeSchemaWrapper();
+		$this->applyAll($schema);
+
+		foreach (['runbook_template_sections', 'runbook_run_sections'] as $tableName) {
+			$table = $this->table($schema, $tableName);
+			self::assertTrue($table->hasColumn('notes'), 'Missing notes column on ' . $tableName);
+			$column = $table->recordedColumns()['notes'];
+			self::assertFalse($column['options']['notnull']);
+			self::assertNull($column['options']['default']);
+		}
+	}
+
 	public function testGuardedMigrationsAreIdempotent(): void {
 		$schema = new FakeSchemaWrapper();
 		$this->applyAll($schema);
@@ -238,6 +253,7 @@ class MigrationSchemaTest extends TestCase {
 		$alreadyGuarded = [
 			new Version0002Date20260201000000(),
 			new Version0006Date20260601000000(),
+			new Version0007Date20260701000000(),
 		];
 		foreach ($alreadyGuarded as $migration) {
 			self::assertNull($migration->changeSchema($this->output, static fn (): ISchemaWrapper => $schema, []));
@@ -263,6 +279,7 @@ class MigrationSchemaTest extends TestCase {
 			Version0004Date20260401000000::class,
 			Version0005Date20260501000000::class,
 			Version0006Date20260601000000::class,
+			Version0007Date20260701000000::class,
 		]);
 	}
 }

@@ -16,10 +16,12 @@ import { apiErrorMessage } from '../utils/apiError.ts'
 
 const props = defineProps<{
 	runId: number
+	stepTitles?: Record<number, string>
 }>()
 
 const events = ref<RunActivityEvent[]>([])
 const order = ref<'asc' | 'desc'>('desc')
+const expanded = ref(true)
 const loading = ref(false)
 const error = ref<string | null>(null)
 
@@ -61,6 +63,8 @@ function eventLabel(type: ActivityType): string {
 			return t('runbook', 'Participants changed')
 		case 'run_assignment_changed':
 			return t('runbook', 'Run assignment changed')
+		case 'section_notes_updated':
+			return t('runbook', 'Section notes updated')
 		case 'step_assignment_changed':
 			return t('runbook', 'Step assignment changed')
 		case 'step_started':
@@ -87,17 +91,57 @@ function eventLabel(type: ActivityType): string {
 }
 
 /**
- * Optional metadata detail for an event.
+ * Render a scalar metadata value, never exposing raw booleans.
+ *
+ * @param value Metadata value.
+ */
+function valueLabel(value: unknown): string | null {
+	if (typeof value === 'boolean') {
+		return value ? t('runbook', 'Yes') : t('runbook', 'No')
+	}
+	if (typeof value === 'string') {
+		return value === '' ? null : value
+	}
+	if (typeof value === 'number') {
+		return String(value)
+	}
+
+	return null
+}
+
+/**
+ * Optional metadata detail for an event: affected section/step, filename and
+ * previous/new values when they were recorded safely.
  *
  * @param event Activity event.
  */
 function eventDetail(event: RunActivityEvent): string | null {
-	const filename = event.metadata.filename
-	if (typeof filename === 'string' && filename !== '') {
-		return filename
+	const parts: string[] = []
+
+	const sectionTitle = event.metadata.sectionTitle
+	if (typeof sectionTitle === 'string' && sectionTitle !== '') {
+		parts.push(sectionTitle)
 	}
 
-	return null
+	if (event.stepId !== null) {
+		const stepTitle = props.stepTitles?.[event.stepId]
+		if (stepTitle !== undefined && stepTitle !== '') {
+			parts.push(stepTitle)
+		}
+	}
+
+	const filename = event.metadata.filename
+	if (typeof filename === 'string' && filename !== '') {
+		parts.push(filename)
+	}
+
+	const previous = valueLabel(event.metadata.previous)
+	const next = valueLabel(event.metadata.new)
+	if (previous !== null || next !== null) {
+		parts.push(`${previous ?? '—'} → ${next ?? '—'}`)
+	}
+
+	return parts.length > 0 ? parts.join(' · ') : null
 }
 
 /**
@@ -114,42 +158,53 @@ function formatDate(timestamp: number): string {
 	<section class="runbook-activity">
 		<div class="runbook-activity__header">
 			<h3>{{ t('runbook', 'Activity') }}</h3>
-			<div class="runbook-activity__order" role="group" :aria-label="t('runbook', 'Activity order')">
+			<div class="runbook-activity__controls">
+				<div class="runbook-activity__order" role="group" :aria-label="t('runbook', 'Activity order')">
+					<NcButton
+						:variant="order === 'desc' ? 'primary' : 'tertiary'"
+						:aria-pressed="order === 'desc'"
+						@click="order = 'desc'">
+						{{ t('runbook', 'Newest first') }}
+					</NcButton>
+					<NcButton
+						:variant="order === 'asc' ? 'primary' : 'tertiary'"
+						:aria-pressed="order === 'asc'"
+						@click="order = 'asc'">
+						{{ t('runbook', 'Oldest first') }}
+					</NcButton>
+				</div>
 				<NcButton
-					:variant="order === 'desc' ? 'primary' : 'tertiary'"
-					:aria-pressed="order === 'desc'"
-					@click="order = 'desc'">
-					{{ t('runbook', 'Newest first') }}
-				</NcButton>
-				<NcButton
-					:variant="order === 'asc' ? 'primary' : 'tertiary'"
-					:aria-pressed="order === 'asc'"
-					@click="order = 'asc'">
-					{{ t('runbook', 'Oldest first') }}
+					variant="tertiary"
+					:aria-expanded="expanded"
+					:aria-label="expanded ? t('runbook', 'Collapse activity') : t('runbook', 'Expand activity')"
+					@click="expanded = !expanded">
+					{{ expanded ? t('runbook', 'Hide activity') : t('runbook', 'Show activity') }}
 				</NcButton>
 			</div>
 		</div>
 
-		<NcNoteCard v-if="error" type="error">
-			{{ error }}
-		</NcNoteCard>
+		<template v-if="expanded">
+			<NcNoteCard v-if="error" type="error">
+				{{ error }}
+			</NcNoteCard>
 
-		<div v-if="loading" class="runbook-activity__center">
-			<NcLoadingIcon :name="t('runbook', 'Loading')" />
-		</div>
+			<div v-if="loading" class="runbook-activity__center">
+				<NcLoadingIcon :name="t('runbook', 'Loading')" />
+			</div>
 
-		<template v-else>
-			<p v-if="events.length === 0" class="runbook-activity__hint">
-				{{ t('runbook', 'No activity recorded yet.') }}
-			</p>
+			<template v-else>
+				<p v-if="events.length === 0" class="runbook-activity__hint">
+					{{ t('runbook', 'No activity recorded yet.') }}
+				</p>
 
-			<ol class="runbook-activity__list">
-				<li v-for="event in events" :key="event.id" class="runbook-activity__item">
-					<span class="runbook-activity__label">{{ eventLabel(event.eventType) }}</span>
-					<span v-if="eventDetail(event)" class="runbook-activity__detail">{{ eventDetail(event) }}</span>
-					<span class="runbook-activity__meta">{{ event.actorUid }} · {{ formatDate(event.createdAt) }}</span>
-				</li>
-			</ol>
+				<ol class="runbook-activity__list">
+					<li v-for="event in events" :key="event.id" class="runbook-activity__item">
+						<span class="runbook-activity__label">{{ eventLabel(event.eventType) }}</span>
+						<span v-if="eventDetail(event)" class="runbook-activity__detail">{{ eventDetail(event) }}</span>
+						<span class="runbook-activity__meta">{{ event.actorUid }} · {{ formatDate(event.createdAt) }}</span>
+					</li>
+				</ol>
+			</template>
 		</template>
 	</section>
 </template>
@@ -166,6 +221,13 @@ function formatDate(timestamp: number): string {
 	display: flex;
 	flex-wrap: wrap;
 	justify-content: space-between;
+	align-items: center;
+	gap: 8px;
+}
+
+.runbook-activity__controls {
+	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 8px;
 }
@@ -187,7 +249,7 @@ function formatDate(timestamp: number): string {
 
 .runbook-activity__list {
 	list-style: none;
-	margin: 0;
+	margin: 8px 0 0;
 	padding: 0;
 }
 

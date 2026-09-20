@@ -17,6 +17,7 @@ enum ActivityType: string {
 	case RunReopened = 'run_reopened';
 	case RunAclChanged = 'run_acl_changed';
 	case RunAssignmentChanged = 'run_assignment_changed';
+	case SectionNotesUpdated = 'section_notes_updated';
 	case StepAssignmentChanged = 'step_assignment_changed';
 	case StepStarted = 'step_started';
 	case StepResponseUpdated = 'step_response_updated';

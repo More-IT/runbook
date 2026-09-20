@@ -47,6 +47,7 @@ export interface RunSection {
 	sourceSectionId: number | null
 	title: string
 	description: string
+	notes: string
 	position: number
 }
 
@@ -141,6 +142,7 @@ export type ActivityType
 		| 'run_reopened'
 		| 'run_acl_changed'
 		| 'run_assignment_changed'
+		| 'section_notes_updated'
 		| 'step_assignment_changed'
 		| 'step_started'
 		| 'step_response_updated'

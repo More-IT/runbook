@@ -5,7 +5,7 @@
 
 <script setup lang="ts">
 import type { AppFeatures } from '../models/adminSettings.ts'
-import type { RunAttachment, RunDetail, StepAssignmentPayload, StepResponse } from '../models/run.ts'
+import type { RunAttachment, RunDetail, RunSectionWithSteps, StepAssignmentPayload, StepResponse } from '../models/run.ts'
 
 import { translate as t } from '@nextcloud/l10n'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
@@ -14,6 +14,7 @@ import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
 import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
 import NcProgressBar from '@nextcloud/vue/components/NcProgressBar'
+import NcTextArea from '@nextcloud/vue/components/NcTextArea'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import RunAclEditor from '../components/RunAclEditor.vue'
 import RunActivityPanel from '../components/RunActivityPanel.vue'
@@ -53,6 +54,79 @@ const commentsEnabled = computed<boolean>(() => features.value?.commentsEnabled 
 const stepReopenEnabled = computed<boolean>(() => features.value?.stepReopenEnabled ?? true)
 const runReopenEnabled = computed<boolean>(() => features.value?.runReopenEnabled ?? true)
 const requireSkipReason = computed<boolean>(() => features.value?.requireSkipReason ?? true)
+
+/**
+ * Per-section collapse override. Only sections that are fully resolved
+ * (every step completed or skipped) default to collapsed; unresolved sections
+ * stay expanded. An explicit user toggle is remembered for the session.
+ */
+const sectionOverrides = ref<Record<number, boolean>>({})
+const editingNotesId = ref<number | null>(null)
+const notesDraft = ref('')
+
+/**
+ * Whether every step of a section is resolved (completed or skipped).
+ *
+ * @param entry Section with its steps.
+ */
+function isSectionResolved(entry: RunSectionWithSteps): boolean {
+	return entry.steps.length > 0
+		&& entry.steps.every((step) => step.status === 'COMPLETED' || step.status === 'SKIPPED')
+}
+
+/**
+ * Whether a section is currently collapsed.
+ *
+ * @param entry Section with its steps.
+ */
+function isCollapsed(entry: RunSectionWithSteps): boolean {
+	return sectionOverrides.value[entry.section.id] ?? isSectionResolved(entry)
+}
+
+/**
+ * Toggle a section's collapsed state.
+ *
+ * @param entry Section with its steps.
+ */
+function toggleSection(entry: RunSectionWithSteps): void {
+	sectionOverrides.value = {
+		...sectionOverrides.value,
+		[entry.section.id]: !isCollapsed(entry),
+	}
+}
+
+/**
+ * Expand the section that contains the given step, if any.
+ *
+ * @param stepId Run step identifier.
+ */
+function expandSectionForStep(stepId: number): void {
+	const entry = detail.value?.sections.find((candidate) => candidate.steps.some((step) => step.id === stepId))
+	if (entry !== undefined && isCollapsed(entry)) {
+		sectionOverrides.value = { ...sectionOverrides.value, [entry.section.id]: false }
+	}
+}
+
+/**
+ * Start editing a section's notes.
+ *
+ * @param entry Section with its steps.
+ */
+function startNotes(entry: RunSectionWithSteps): void {
+	editingNotesId.value = entry.section.id
+	notesDraft.value = entry.section.notes
+}
+
+/**
+ * Save the section notes currently being edited.
+ *
+ * @param sectionId Run section identifier.
+ */
+function saveNotes(sectionId: number): void {
+	const value = notesDraft.value
+	editingNotesId.value = null
+	void mutate(() => api.updateRunSectionNotes(sectionId, value))
+}
 
 /**
  *
@@ -99,6 +173,7 @@ async function applyStepFocus(): Promise<void> {
 	}
 
 	highlightedStepId.value = target
+	expandSectionForStep(target)
 	await nextTick()
 
 	const container = root.value
@@ -299,12 +374,20 @@ function formatDate(timestamp: number): string {
 
 			<div class="runbook-run__progress">
 				<NcProgressBar :value="detail.progress.percentage" />
-				<span>
+				<span class="runbook-run__progress-summary">
 					{{ t('runbook', 'Progress: {percent}%', { percent: detail.progress.percentage }) }}
 					({{ t('runbook', '{resolved} of {total} steps resolved', { resolved: detail.progress.completed + detail.progress.skipped, total: detail.progress.total }) }})
 				</span>
-				<span v-if="detail.progress.skipped > 0">
-					{{ t('runbook', '{count} skipped', { count: detail.progress.skipped }) }}
+				<span class="runbook-run__progress-breakdown">
+					<span class="runbook-run__progress-item runbook-run__progress-item--completed">
+						{{ t('runbook', 'Completed: {count}', { count: detail.progress.completed }) }}
+					</span>
+					<span class="runbook-run__progress-item runbook-run__progress-item--skipped">
+						{{ t('runbook', 'Skipped: {count}', { count: detail.progress.skipped }) }}
+					</span>
+					<span class="runbook-run__progress-item runbook-run__progress-item--pending">
+						{{ t('runbook', 'Pending: {count}', { count: detail.progress.pending }) }}
+					</span>
 				</span>
 			</div>
 
@@ -332,36 +415,74 @@ function formatDate(timestamp: number): string {
 
 			<div class="runbook-run__sections">
 				<div v-for="entry in detail.sections" :key="entry.section.id" class="runbook-run__section">
-					<h3>{{ entry.section.title }}</h3>
+					<div class="runbook-run__section-header">
+						<h3>{{ entry.section.title }}</h3>
+						<NcButton
+							v-if="entry.steps.length > 0"
+							variant="tertiary"
+							:aria-expanded="!isCollapsed(entry)"
+							:aria-label="isCollapsed(entry) ? t('runbook', 'Expand section {title}', { title: entry.section.title }) : t('runbook', 'Collapse section {title}', { title: entry.section.title })"
+							@click="toggleSection(entry)">
+							{{ isCollapsed(entry) ? t('runbook', 'Expand') : t('runbook', 'Collapse') }}
+						</NcButton>
+					</div>
 					<p v-if="entry.section.description" class="runbook-run__description">
 						{{ entry.section.description }}
 					</p>
+
 					<div
-						v-for="step in entry.steps"
-						:key="step.id"
-						class="runbook-run__step-anchor"
-						:class="{ 'runbook-run__step-anchor--highlighted': highlightedStepId === step.id }"
-						:data-runbook-step-id="step.id"
-						tabindex="-1">
-						<RunStepCard
-							:step="step"
-							:runActive="runActive"
-							:canExecute="canExecuteStep(step.id)"
-							:canManageAssignments="detail.permissions.canManageAssignments"
-							:attachments="attachmentsForStep(step.id)"
-							:canUploadEvidence="runActive && canExecuteStep(step.id)"
-							:uid="detail.permissions.uid"
-							:isOwner="detail.permissions.canManage"
-							:canReopen="stepReopenEnabled"
-							:requireSkipReason="requireSkipReason"
-							@start="startStep(step.id)"
-							@save="(response) => saveStep(step.id, response)"
-							@complete="(response) => completeStep(step.id, response)"
-							@skip="(reason) => skipStep(step.id, reason)"
-							@reopen="reopenStep(step.id)"
-							@assign="(payload) => assignStep(step.id, payload)"
-							@uploadEvidence="(file) => uploadEvidence(step.id, file)"
-							@deleteEvidence="deleteEvidence" />
+						v-if="entry.section.notes !== '' || editingNotesId === entry.section.id || (detail.permissions.canManage && runActive)"
+						class="runbook-run__section-notes">
+						<NcTextArea
+							v-if="editingNotesId === entry.section.id"
+							v-model="notesDraft"
+							:label="t('runbook', 'Section notes')" />
+						<p v-else-if="entry.section.notes !== ''" class="runbook-run__notes-text">
+							{{ entry.section.notes }}
+						</p>
+						<div v-if="detail.permissions.canManage && runActive" class="runbook-run__notes-actions">
+							<template v-if="editingNotesId === entry.section.id">
+								<NcButton variant="primary" :disabled="busy" @click="saveNotes(entry.section.id)">
+									{{ t('runbook', 'Save notes') }}
+								</NcButton>
+								<NcButton @click="editingNotesId = null">
+									{{ t('runbook', 'Cancel') }}
+								</NcButton>
+							</template>
+							<NcButton v-else @click="startNotes(entry)">
+								{{ t('runbook', 'Edit notes') }}
+							</NcButton>
+						</div>
+					</div>
+
+					<div v-show="!isCollapsed(entry)">
+						<div
+							v-for="step in entry.steps"
+							:key="step.id"
+							class="runbook-run__step-anchor"
+							:class="{ 'runbook-run__step-anchor--highlighted': highlightedStepId === step.id }"
+							:data-runbook-step-id="step.id"
+							tabindex="-1">
+							<RunStepCard
+								:step="step"
+								:runActive="runActive"
+								:canExecute="canExecuteStep(step.id)"
+								:canManageAssignments="detail.permissions.canManageAssignments"
+								:attachments="attachmentsForStep(step.id)"
+								:canUploadEvidence="runActive && canExecuteStep(step.id)"
+								:uid="detail.permissions.uid"
+								:isOwner="detail.permissions.canManage"
+								:canReopen="stepReopenEnabled"
+								:requireSkipReason="requireSkipReason"
+								@start="startStep(step.id)"
+								@save="(response) => saveStep(step.id, response)"
+								@complete="(response) => completeStep(step.id, response)"
+								@skip="(reason) => skipStep(step.id, reason)"
+								@reopen="reopenStep(step.id)"
+								@assign="(payload) => assignStep(step.id, payload)"
+								@uploadEvidence="(file) => uploadEvidence(step.id, file)"
+								@deleteEvidence="deleteEvidence" />
+						</div>
 					</div>
 				</div>
 			</div>
@@ -381,7 +502,7 @@ function formatDate(timestamp: number): string {
 				:active="runActive"
 				:steps="commentSteps" />
 
-			<RunActivityPanel :runId="runId" />
+			<RunActivityPanel :runId="runId" :stepTitles="stepTitles" />
 
 			<p v-if="detail.run.completedAt !== null" class="runbook-run__timestamps">
 				{{ t('runbook', 'Completed on {date}', { date: formatDate(detail.run.completedAt) }) }}
@@ -443,6 +564,33 @@ function formatDate(timestamp: number): string {
 	margin: 16px 0;
 }
 
+.runbook-run__progress-summary {
+	color: var(--color-text-maxcontrast, #555);
+}
+
+.runbook-run__progress-breakdown {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+}
+
+.runbook-run__progress-item {
+	font-size: 0.85em;
+	font-weight: bold;
+}
+
+.runbook-run__progress-item--completed {
+	color: var(--color-success-element, #099f05);
+}
+
+.runbook-run__progress-item--skipped {
+	color: var(--color-warning-element, #bf7900);
+}
+
+.runbook-run__progress-item--pending {
+	color: var(--color-info-element, #0077c7);
+}
+
 .runbook-run__actions {
 	display: flex;
 	flex-wrap: wrap;
@@ -452,6 +600,33 @@ function formatDate(timestamp: number): string {
 
 .runbook-run__section {
 	margin-bottom: 16px;
+}
+
+.runbook-run__section-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.runbook-run__section-notes {
+	border-inline-start: 3px solid var(--color-border-dark, #ccc);
+	background-color: var(--color-background-hover, #f5f5f5);
+	border-radius: var(--border-radius, 4px);
+	padding: 8px;
+	margin: 8px 0;
+}
+
+.runbook-run__notes-text {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	margin: 0 0 4px;
+}
+
+.runbook-run__notes-actions {
+	display: flex;
+	gap: 8px;
 }
 
 .runbook-run__step-anchor {

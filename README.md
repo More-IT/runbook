@@ -91,6 +91,20 @@ Milestone 0.1.1 — Production fixes:
 - Opening a "My Work" item navigates to and highlights the matching step.
 - The activity timeline can be switched between newest-first and oldest-first.
 
+Milestone 0.2.0 — UX and collaboration:
+
+- Section notes authored on templates and carried into every run snapshot; the
+  run owner can update a run section's notes while the run is active and the
+  change is recorded in the activity history.
+- Fully resolved sections (all steps completed or skipped) collapse by default,
+  with an accessible expand/collapse control; sections with pending work stay
+  expanded and a step opened from "My Work" expands its section.
+- Theme-safe step status accents (completed, pending, in progress, skipped and
+  reopened) built from Nextcloud theme variables.
+- The activity panel can be collapsed and shows richer, non-sensitive detail
+  (actor, timestamp, affected section/step and, where safe, previous/new
+  values) while keeping file contents and storage paths out of the log.
+
 > Recurring runs, conditional steps, template import/export, calendar, Talk,
 > webhooks, API tokens, automation and AI are **not** implemented.
 
@@ -276,7 +290,7 @@ Oracle is not declared because the required table name
   (`ISchemaWrapper`/`Doctrine\DBAL\Schema\Table`); no database-specific SQL is
   written.
 - Each milestone adds one ordered, additive migration
-  (`Version0001…` through `Version0006…`). Migration names and versions are
+  (`Version0001…` through `Version0007…`). Migration names and versions are
   ordered and never rewritten after release.
 - Structural changes are guarded with `hasTable`, `hasColumn` and `hasIndex`
   checks, so a partially applied upgrade is safe to re-run.
@@ -471,9 +485,9 @@ Step states are `PENDING`, `IN_PROGRESS`, `COMPLETED` and `SKIPPED`:
 
 Starting a run copies the template structure into independent run records. The
 snapshot stores the source template id and version, the run title and
-description, section titles and order and step titles, types, required flags,
-configuration (including the configured `NUMBER` unit) and order. The copied
-data is authoritative for execution:
+description, section titles, descriptions, notes and order and step titles,
+types, required flags, configuration (including the configured `NUMBER` unit)
+and order. The copied data is authoritative for execution:
 
 - later changes to the template never modify an existing run;
 - a run stays readable if its source template is archived or deleted;
@@ -499,6 +513,25 @@ skipped with a non-empty reason. A skipped required step counts as resolved for
 run completion but stays visibly marked as skipped. Run progress is calculated
 from the steps (`PENDING` and `IN_PROGRESS` count as pending); it is never
 persisted.
+
+## Progress
+
+Progress is derived from the run's step snapshot and is never persisted.
+
+- `COMPLETED` and `SKIPPED` both count as *resolved*; skipped steps are never
+  counted as pending, so a run whose steps were all completed or skipped is
+  100 % resolved.
+- `PENDING` and `IN_PROGRESS` count as pending. A run with no steps is treated
+  as fully resolved (100 %).
+- A run may only be completed while it is active and no required step is still
+  pending.
+- The run detail shows the percentage, the resolved/total ratio and an explicit
+  completed / skipped / pending breakdown. The breakdown is textual as well as
+  colour-coded, so status is never conveyed by colour alone.
+- "My Work" and the overview use the same rule: skipped steps appear under the
+  *completed* filter and are never listed as active work, and the Dashboard
+  widget's active/overdue/due-today counts are built from the same
+  pending/in-progress definition.
 
 The storage format of a response is always the raw value (`true`/`false` for
 booleans, a number for `NUMBER`, a string for the other types), but the user
@@ -576,12 +609,36 @@ record the actor, timestamp, optional step and a small metadata payload. Storage
 paths, file contents and comment bodies are never persisted in activity rows.
 
 Recorded events include run start/completion/cancellation/reopen, run participant
-changes, step assignment changes (including the automatic assignment of
-unassigned steps when a run starts), step start/response/complete/skip/reopen,
-comment add/edit/delete and evidence upload/delete. The run activity endpoint
-requires read access to the run and returns at most 200 events (default 100).
-The `order` query parameter accepts `desc` (newest first, the default) or `asc`
-(oldest first); the run detail view exposes a control to switch between them.
+changes, section notes updates, step assignment changes (including the automatic
+assignment of unassigned steps when a run starts), step start/response/complete/
+skip/reopen, comment add/edit/delete and evidence upload/delete. The run activity
+endpoint requires read access to the run and returns at most 200 events (default
+100). The `order` query parameter accepts `desc` (newest first, the default) or
+`asc` (oldest first); the run detail view exposes a control to switch between
+them and to collapse the panel. The panel renders the actor and timestamp for
+every event and, where it was recorded safely, the affected section/step and
+previous/new values; free-text note bodies, response contents, file contents and
+storage paths are never stored in activity rows.
+
+## Step status colors
+
+Step status is reinforced with a theme-safe accent on the left edge of each run
+step card and on its status label:
+
+| Status | Color family |
+| ------ | ------------ |
+| Completed | green (`--color-success-element`) |
+| Pending / not started | blue (`--color-info-element`) |
+| In progress | red (`--color-error-element`) |
+| Skipped | dark yellow (`--color-warning-element`) |
+| Reopened and actionable | orange (mix of the warning and error element colors) |
+
+The colors are derived from the Nextcloud theme variables, so they adapt to the
+light, dark and high-contrast themes instead of being hard-coded. No separate
+color configuration is offered: the theming app already provides the accessible
+palette, and a second color source would risk breaking contrast and dark theme
+support. Administrators who need different colors can change the instance
+accent/theme through Nextcloud's own theming settings.
 
 ## Notifications
 
@@ -878,7 +935,7 @@ the typed Nextcloud app configuration API.
 
 ## Release
 
-- **Version:** 0.1.1 (`appinfo/info.xml`, `package.json`).
+- **Version:** 0.2.0 (`appinfo/info.xml`, `package.json`).
 - **Nextcloud:** 33.
 - **PHP:** 8.2 – 8.5.
 - **Databases:** MySQL/MariaDB, PostgreSQL and SQLite.
@@ -950,7 +1007,7 @@ php build/create-package.php
 ```
 
 `build/create-package.php` writes a staging tree with runtime files only and
-creates `runbook-0.1.1.tar.gz` (archive root `runbook/`). It validates the
+creates `runbook-0.2.0.tar.gz` (archive root `runbook/`). It validates the
 staging tree with `build/validate-package.php` before archiving. Validate an
 existing tree at any time with `composer package:check`.
 
@@ -965,7 +1022,7 @@ Live verification was completed against a disposable Docker environment:
 - image `nextcloud:33-apache` (Nextcloud 33.0.9, PHP 8.4, SQLite);
 - the packaged app (not the development tree) was installed into
   `custom_apps/runbook`;
-- enabling the app applied all six migrations and created all thirteen tables;
+- enabling the app applied all seven migrations and created all thirteen tables;
 - the main page and the administration settings page loaded and their compiled
   assets were served (HTTP 200);
 - the app appeared in the Nextcloud navigation;
