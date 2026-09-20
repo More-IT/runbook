@@ -83,6 +83,18 @@ const selectedType = computed<TypeOption | null>({
 })
 
 /**
+ * Configured unit of a NUMBER step for display, or an empty string when none.
+ */
+const unitDisplay = computed<string>(() => {
+	if (props.step.type !== 'NUMBER') {
+		return ''
+	}
+	const value = props.step.config.unit
+
+	return typeof value === 'string' ? value.trim() : ''
+})
+
+/**
  * Reset the local form state from the current step value.
  */
 function reset(): void {
@@ -153,6 +165,7 @@ function submit(): void {
 			</button>
 			<span class="runbook-step__title">{{ step.title }}</span>
 			<span class="runbook-step__type">{{ typeLabel(step.type) }}</span>
+			<span v-if="unitDisplay !== ''" class="runbook-step__unit">{{ unitDisplay }}</span>
 			<span v-if="step.required" class="runbook-step__required">{{ t('runbook', 'Required') }}</span>
 			<div class="runbook-step__actions">
 				<NcButton
@@ -260,6 +273,7 @@ function submit(): void {
 }
 
 .runbook-step__type,
+.runbook-step__unit,
 .runbook-step__required {
 	color: var(--color-text-maxcontrast, #555);
 	font-size: 0.85em;

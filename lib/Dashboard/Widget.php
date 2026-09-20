@@ -94,14 +94,19 @@ class Widget implements IAPIWidgetV2, IButtonWidget, IIconWidget, IOptionWidget 
 			);
 		}
 
+		// WidgetItems maps the second constructor argument to the empty state
+		// (shown only when there are no items) and the third to the "half
+		// empty" summary shown above the list. The summary must never be used
+		// as the empty state and the empty message must never be shown while
+		// pending work exists.
 		return new WidgetItems(
 			$items,
+			$this->l10n()->t('No assigned work right now.'),
 			$this->l10n()->t('{active} active, {overdue} overdue, {dueToday} due today', [
 				'active' => count($work),
 				'overdue' => $overdue,
 				'dueToday' => $dueToday,
 			]),
-			$this->l10n()->t('No assigned work right now.'),
 		);
 	}
 

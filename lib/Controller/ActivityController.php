@@ -6,6 +6,7 @@ namespace OCA\Runbook\Controller;
 
 use OCA\Runbook\Db\ActivityEvent;
 use OCA\Runbook\Service\RunService;
+use OCA\Runbook\Service\ValidationException;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\JSONResponse;
@@ -30,9 +31,14 @@ class ActivityController extends ApiController {
 	 */
 	#[NoAdminRequired]
 	public function index(): JSONResponse {
+		$order = $this->request->getParam('order');
+		if ($order !== null && !is_string($order)) {
+			throw new ValidationException('invalid_field');
+		}
+
 		$events = array_map(
 			static fn (ActivityEvent $event): array => $event->toArray(),
-			$this->runService->listActivity($this->requireId('id'), $this->optionalInt('limit')),
+			$this->runService->listActivity($this->requireId('id'), $this->optionalInt('limit'), $order),
 		);
 
 		return new JSONResponse(['activity' => $events]);

@@ -8,7 +8,7 @@ import type { AppFeatures } from '../models/adminSettings.ts'
 import type { RunAttachment, RunDetail, StepAssignmentPayload, StepResponse } from '../models/run.ts'
 
 import { translate as t } from '@nextcloud/l10n'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcEmptyContent from '@nextcloud/vue/components/NcEmptyContent'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
@@ -27,12 +27,15 @@ import { apiErrorMessage } from '../utils/apiError.ts'
 
 const props = defineProps<{
 	runId: number
+	focusStepId?: number | null
 }>()
 
 const emit = defineEmits<{
 	close: []
 }>()
 
+const root = ref<HTMLElement | null>(null)
+const highlightedStepId = ref<number | null>(null)
 const detail = ref<RunDetail | null>(null)
 const attachments = ref<RunAttachment[]>([])
 const features = ref<AppFeatures | null>(null)
@@ -71,10 +74,42 @@ async function load(): Promise<void> {
 	} finally {
 		loading.value = false
 	}
+
+	// Focus after the loading state is cleared so the step anchors are rendered.
+	await applyStepFocus()
 }
 
 onMounted(load)
 watch(() => props.runId, load)
+watch(() => props.focusStepId, () => {
+	void applyStepFocus()
+})
+
+/**
+ * Scroll to and highlight the step referenced by the current deep link.
+ *
+ * The step only exists once the run detail has been loaded, so this is called
+ * after every load as well as when the requested step changes.
+ */
+async function applyStepFocus(): Promise<void> {
+	const target = props.focusStepId ?? null
+	if (target === null || detail.value === null || !steps.value.some((step) => step.id === target)) {
+		highlightedStepId.value = null
+		return
+	}
+
+	highlightedStepId.value = target
+	await nextTick()
+
+	const container = root.value
+	const element = container?.querySelector<HTMLElement>(`[data-runbook-step-id="${target}"]`) ?? null
+	if (element === null) {
+		return
+	}
+
+	element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+	element.focus({ preventScroll: true })
+}
 
 /**
  * Run a mutation and reload the detail afterwards.
@@ -222,7 +257,7 @@ function formatDate(timestamp: number): string {
 </script>
 
 <template>
-	<section class="runbook-run">
+	<section ref="root" class="runbook-run">
 		<header class="runbook-run__header">
 			<NcButton @click="emit('close')">
 				{{ t('runbook', 'Back to runs') }}
@@ -301,27 +336,33 @@ function formatDate(timestamp: number): string {
 					<p v-if="entry.section.description" class="runbook-run__description">
 						{{ entry.section.description }}
 					</p>
-					<RunStepCard
+					<div
 						v-for="step in entry.steps"
 						:key="step.id"
-						:step="step"
-						:runActive="runActive"
-						:canExecute="canExecuteStep(step.id)"
-						:canManageAssignments="detail.permissions.canManageAssignments"
-						:attachments="attachmentsForStep(step.id)"
-						:canUploadEvidence="runActive && canExecuteStep(step.id)"
-						:uid="detail.permissions.uid"
-						:isOwner="detail.permissions.canManage"
-						:canReopen="stepReopenEnabled"
-						:requireSkipReason="requireSkipReason"
-						@start="startStep(step.id)"
-						@save="(response) => saveStep(step.id, response)"
-						@complete="(response) => completeStep(step.id, response)"
-						@skip="(reason) => skipStep(step.id, reason)"
-						@reopen="reopenStep(step.id)"
-						@assign="(payload) => assignStep(step.id, payload)"
-						@uploadEvidence="(file) => uploadEvidence(step.id, file)"
-						@deleteEvidence="deleteEvidence" />
+						class="runbook-run__step-anchor"
+						:class="{ 'runbook-run__step-anchor--highlighted': highlightedStepId === step.id }"
+						:data-runbook-step-id="step.id"
+						tabindex="-1">
+						<RunStepCard
+							:step="step"
+							:runActive="runActive"
+							:canExecute="canExecuteStep(step.id)"
+							:canManageAssignments="detail.permissions.canManageAssignments"
+							:attachments="attachmentsForStep(step.id)"
+							:canUploadEvidence="runActive && canExecuteStep(step.id)"
+							:uid="detail.permissions.uid"
+							:isOwner="detail.permissions.canManage"
+							:canReopen="stepReopenEnabled"
+							:requireSkipReason="requireSkipReason"
+							@start="startStep(step.id)"
+							@save="(response) => saveStep(step.id, response)"
+							@complete="(response) => completeStep(step.id, response)"
+							@skip="(reason) => skipStep(step.id, reason)"
+							@reopen="reopenStep(step.id)"
+							@assign="(payload) => assignStep(step.id, payload)"
+							@uploadEvidence="(file) => uploadEvidence(step.id, file)"
+							@deleteEvidence="deleteEvidence" />
+					</div>
 				</div>
 			</div>
 
@@ -411,5 +452,16 @@ function formatDate(timestamp: number): string {
 
 .runbook-run__section {
 	margin-bottom: 16px;
+}
+
+.runbook-run__step-anchor {
+	border-radius: var(--border-radius, 4px);
+	outline: none;
+}
+
+.runbook-run__step-anchor--highlighted {
+	outline: 3px solid var(--color-primary-element, #0082c9);
+	outline-offset: 2px;
+	background-color: var(--color-primary-light, #e6f0f8);
 }
 </style>

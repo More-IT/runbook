@@ -17,7 +17,7 @@ class StatusControllerTest extends TestCase {
 			->expects(self::once())
 			->method('getAppVersion')
 			->with('runbook')
-			->willReturn('0.1.0');
+			->willReturn('0.1.1');
 
 		$controller = new StatusController('runbook', $this->createMock(IRequest::class), $appManager);
 
@@ -28,7 +28,7 @@ class StatusControllerTest extends TestCase {
 		self::assertSame([
 			'status' => 'ok',
 			'app' => 'runbook',
-			'version' => '0.1.0',
+			'version' => '0.1.1',
 		], $response->getData());
 	}
 }

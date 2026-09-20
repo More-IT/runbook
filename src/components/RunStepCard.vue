@@ -64,6 +64,21 @@ const selectOptions = computed<string[]>(() => {
 	return Array.isArray(options) ? options.filter((option): option is string => typeof option === 'string') : []
 })
 
+/**
+ * Configured unit of a NUMBER step, or an empty string when none is set.
+ */
+const unit = computed<string>(() => {
+	const value = props.step.config.unit
+	return typeof value === 'string' ? value.trim() : ''
+})
+
+/**
+ * Label of the NUMBER response field, including the configured unit.
+ */
+const numberFieldLabel = computed<string>(() => unit.value === ''
+	? t('runbook', 'Response')
+	: t('runbook', 'Response ({unit})', { unit: unit.value }))
+
 const isEditable = computed<boolean>(() => props.step.status === 'PENDING' || props.step.status === 'IN_PROGRESS')
 const canComplete = computed<boolean>(() => props.step.type !== 'FILE' || !props.step.required)
 const isOverdue = computed<boolean>(() => isEditable.value && props.step.dueAt !== null && props.step.dueAt < Date.now() / 1000)
@@ -110,6 +125,32 @@ function statusLabel(status: RunStepStatus): string {
 		default:
 			return t('runbook', 'Pending')
 	}
+}
+
+/**
+ * Human readable representation of a stored response.
+ *
+ * Booleans are never rendered as "true"/"false": confirmation steps use
+ * "Confirmed"/"Not confirmed" and check steps use "Yes"/"No". Number responses
+ * include the configured unit when present.
+ */
+function responseText(): string {
+	const response = props.step.response
+	if (response === null) {
+		return ''
+	}
+	if (typeof response === 'boolean') {
+		if (props.step.type === 'CONFIRMATION') {
+			return response ? t('runbook', 'Confirmed') : t('runbook', 'Not confirmed')
+		}
+
+		return response ? t('runbook', 'Yes') : t('runbook', 'No')
+	}
+	if (props.step.type === 'NUMBER' && unit.value !== '') {
+		return `${response} ${unit.value}`
+	}
+
+	return String(response)
 }
 
 /**
@@ -296,6 +337,7 @@ function submitAssignment(): void {
 		<div class="runbook-run-step__header">
 			<span class="runbook-run-step__title">{{ step.title }}</span>
 			<span class="runbook-run-step__type">{{ typeLabel(step.type) }}</span>
+			<span v-if="unit !== ''" class="runbook-run-step__unit">{{ unit }}</span>
 			<span v-if="step.required" class="runbook-run-step__required">{{ t('runbook', 'Required') }}</span>
 			<span class="runbook-run-step__status">{{ statusLabel(step.status) }}</span>
 			<span v-if="isOverdue" class="runbook-run-step__overdue">{{ t('runbook', 'Overdue') }}</span>
@@ -346,7 +388,7 @@ function submitAssignment(): void {
 				v-else-if="step.type === 'NUMBER'"
 				v-model="numberValue"
 				type="number"
-				:label="t('runbook', 'Response')" />
+				:label="numberFieldLabel" />
 
 			<NcSelect
 				v-else-if="step.type === 'SELECT'"
@@ -377,7 +419,7 @@ function submitAssignment(): void {
 				{{ t('runbook', 'Skipped: {reason}', { reason: step.skipReason }) }}
 			</p>
 			<p v-else-if="step.response !== null">
-				{{ t('runbook', 'Response: {response}', { response: String(step.response) }) }}
+				{{ t('runbook', 'Response: {response}', { response: responseText() }) }}
 			</p>
 		</div>
 
@@ -461,6 +503,7 @@ function submitAssignment(): void {
 }
 
 .runbook-run-step__type,
+.runbook-run-step__unit,
 .runbook-run-step__required,
 .runbook-run-step__status,
 .runbook-run-step__assignee {

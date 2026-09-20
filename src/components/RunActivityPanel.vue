@@ -8,6 +8,7 @@ import type { ActivityType, RunActivityEvent } from '../models/run.ts'
 
 import { translate as t } from '@nextcloud/l10n'
 import { onMounted, ref, watch } from 'vue'
+import NcButton from '@nextcloud/vue/components/NcButton'
 import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
 import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
 import * as api from '../services/runs.ts'
@@ -18,17 +19,18 @@ const props = defineProps<{
 }>()
 
 const events = ref<RunActivityEvent[]>([])
+const order = ref<'asc' | 'desc'>('desc')
 const loading = ref(false)
 const error = ref<string | null>(null)
 
 /**
- * Load the activity history of the run.
+ * Load the activity history of the run in the requested order.
  */
 async function load(): Promise<void> {
 	loading.value = true
 	error.value = null
 	try {
-		events.value = await api.getActivity(props.runId)
+		events.value = await api.getActivity(props.runId, undefined, order.value)
 	} catch (caught) {
 		error.value = apiErrorMessage(caught)
 	} finally {
@@ -38,6 +40,7 @@ async function load(): Promise<void> {
 
 onMounted(load)
 watch(() => props.runId, load)
+watch(order, load)
 
 /**
  * Human readable label for an activity event type.
@@ -109,7 +112,23 @@ function formatDate(timestamp: number): string {
 
 <template>
 	<section class="runbook-activity">
-		<h3>{{ t('runbook', 'Activity') }}</h3>
+		<div class="runbook-activity__header">
+			<h3>{{ t('runbook', 'Activity') }}</h3>
+			<div class="runbook-activity__order" role="group" :aria-label="t('runbook', 'Activity order')">
+				<NcButton
+					:variant="order === 'desc' ? 'primary' : 'tertiary'"
+					:aria-pressed="order === 'desc'"
+					@click="order = 'desc'">
+					{{ t('runbook', 'Newest first') }}
+				</NcButton>
+				<NcButton
+					:variant="order === 'asc' ? 'primary' : 'tertiary'"
+					:aria-pressed="order === 'asc'"
+					@click="order = 'asc'">
+					{{ t('runbook', 'Oldest first') }}
+				</NcButton>
+			</div>
+		</div>
 
 		<NcNoteCard v-if="error" type="error">
 			{{ error }}
@@ -141,6 +160,19 @@ function formatDate(timestamp: number): string {
 	border-radius: var(--border-radius, 4px);
 	padding: 12px;
 	margin-bottom: 24px;
+}
+
+.runbook-activity__header {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	align-items: center;
+	gap: 8px;
+}
+
+.runbook-activity__order {
+	display: flex;
+	gap: 4px;
 }
 
 .runbook-activity__hint {

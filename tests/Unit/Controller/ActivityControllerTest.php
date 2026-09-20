@@ -50,7 +50,7 @@ class ActivityControllerTest extends TestCase {
 	public function testIndexReturnsActivity(): void {
 		$this->runService->expects(self::once())
 			->method('listActivity')
-			->with(1, null)
+			->with(1, null, null)
 			->willReturn([$this->event()]);
 
 		$response = $this->controller(['id' => '1'])->index();
@@ -63,10 +63,21 @@ class ActivityControllerTest extends TestCase {
 	public function testIndexPassesLimit(): void {
 		$this->runService->expects(self::once())
 			->method('listActivity')
-			->with(1, 50)
+			->with(1, 50, null)
 			->willReturn([]);
 
 		$response = $this->controller(['id' => '1', 'limit' => '50'])->index();
+
+		self::assertSame([], $response->getData()['activity']);
+	}
+
+	public function testIndexPassesOrder(): void {
+		$this->runService->expects(self::once())
+			->method('listActivity')
+			->with(1, null, 'asc')
+			->willReturn([]);
+
+		$response = $this->controller(['id' => '1', 'order' => 'asc'])->index();
 
 		self::assertSame([], $response->getData()['activity']);
 	}

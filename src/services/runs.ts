@@ -305,14 +305,23 @@ export function attachmentDownloadUrl(id: number): string {
 }
 
 /**
- * Load the activity history of a run, newest first.
+ * Load the activity history of a run.
  *
  * @param runId Run identifier.
  * @param limit Maximum number of events.
+ * @param order `desc` for newest first (default) or `asc` for oldest first.
  */
-export async function getActivity(runId: number, limit?: number): Promise<RunActivityEvent[]> {
+export async function getActivity(runId: number, limit?: number, order?: 'asc' | 'desc'): Promise<RunActivityEvent[]> {
+	const params: Record<string, string | number> = {}
+	if (limit !== undefined) {
+		params.limit = limit
+	}
+	if (order !== undefined) {
+		params.order = order
+	}
+
 	const { data } = await axios.get<{ activity: RunActivityEvent[] }>(endpoint(`/runs/${runId}/activity`), {
-		params: limit === undefined ? {} : { limit },
+		params,
 	})
 
 	return data.activity

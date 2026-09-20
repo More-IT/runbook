@@ -35,6 +35,7 @@ const navigation: NavigationEntry[] = [
 const activeSection = ref<string>('templates')
 const editingTemplateId = ref<number | null>(null)
 const activeRunId = ref<number | null>(null)
+const focusStepId = ref<number | null>(null)
 
 const { status, checkBackendStatus } = useBackendStatus()
 
@@ -84,6 +85,7 @@ function selectSection(id: string): void {
 	activeSection.value = id
 	editingTemplateId.value = null
 	activeRunId.value = null
+	focusStepId.value = null
 	setHash(`#${id}`)
 }
 
@@ -94,18 +96,21 @@ function selectSection(id: string): void {
  */
 function openTemplate(id: number): void {
 	activeRunId.value = null
+	focusStepId.value = null
 	editingTemplateId.value = id
 	setHash(`#/template/${id}`)
 }
 
 /**
- * Open a run detail view.
+ * Open a run detail view, optionally focusing a specific step.
  *
  * @param id Run identifier.
+ * @param stepId Run step identifier to focus, if any.
  */
-function openRun(id: number): void {
+function openRun(id: number, stepId: number | null = null): void {
 	activeRunId.value = id
-	setHash(`#/run/${id}`)
+	focusStepId.value = stepId
+	setHash(stepId === null ? `#/run/${id}` : `#/run/${id}/step/${stepId}`)
 }
 
 /**
@@ -117,6 +122,7 @@ function onRunStarted(id: number): void {
 	editingTemplateId.value = null
 	activeSection.value = 'runs'
 	activeRunId.value = id
+	focusStepId.value = null
 	setHash(`#/run/${id}`)
 }
 
@@ -125,6 +131,7 @@ function onRunStarted(id: number): void {
  */
 function closeRun(): void {
 	activeRunId.value = null
+	focusStepId.value = null
 	setHash('#runs')
 }
 
@@ -152,9 +159,17 @@ function applyHash(): void {
 	if (parts[0] === 'run' && parts.length > 1) {
 		const runId = Number(parts[1])
 		if (Number.isInteger(runId) && runId > 0) {
+			let stepId: number | null = null
+			if (parts[2] === 'step' && parts.length > 3) {
+				const candidate = Number(parts[3])
+				if (Number.isInteger(candidate) && candidate > 0) {
+					stepId = candidate
+				}
+			}
 			activeSection.value = 'runs'
 			editingTemplateId.value = null
 			activeRunId.value = runId
+			focusStepId.value = stepId
 			return
 		}
 	}
@@ -163,6 +178,7 @@ function applyHash(): void {
 		const templateId = Number(parts[1])
 		if (Number.isInteger(templateId) && templateId > 0) {
 			activeRunId.value = null
+			focusStepId.value = null
 			editingTemplateId.value = templateId
 			return
 		}
@@ -197,6 +213,7 @@ onMounted(() => {
 			<RunDetailView
 				v-if="activeRunId !== null"
 				:runId="activeRunId"
+				:focusStepId="focusStepId"
 				@close="closeRun" />
 			<TemplateEditorView
 				v-else-if="editingTemplateId !== null"

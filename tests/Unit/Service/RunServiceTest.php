@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace OCA\Runbook\Tests\Unit\Service;
 
+use OCA\Runbook\Db\ActivityEvent;
 use OCA\Runbook\Db\Run;
 use OCA\Runbook\Db\RunStep;
 use OCA\Runbook\Enum\AclRole;
+use OCA\Runbook\Enum\ActivityType;
 use OCA\Runbook\Enum\PrincipalType;
 use OCA\Runbook\Enum\RunAclRole;
 use OCA\Runbook\Enum\RunStatus;
@@ -287,6 +289,98 @@ class RunServiceTest extends RunTestBase {
 		self::assertSame(PrincipalType::User->value, $runStep->getAssigneeType());
 		self::assertSame('bob', $runStep->getAssigneeId());
 		self::assertSame($this->now + 3600, $runStep->getDueAt());
+	}
+
+	public function testStartRunAssignsUnassignedStepsToStarter(): void {
+		$this->addUser('alice');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Unassigned', 'CHECK', true, 0);
+
+		$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Run']);
+
+		$runStep = array_values($this->runSteps)[0];
+		self::assertSame(PrincipalType::User->value, $runStep->getAssigneeType());
+		self::assertSame('alice', $runStep->getAssigneeId());
+	}
+
+	public function testAutoAssignedStepAppearsInMyWork(): void {
+		$this->addUser('alice');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Unassigned', 'CHECK', true, 0);
+
+		$run = $this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Run']);
+		$runStep = array_values($this->runSteps)[0];
+
+		$work = $this->workServiceFor('alice')->myWork('all');
+
+		self::assertCount(1, $work);
+		self::assertSame($run->getId(), $work[0]['run']->getId());
+		self::assertSame($runStep->getId(), $work[0]['step']->getId());
+		self::assertSame('alice', $work[0]['step']->getAssigneeId());
+	}
+
+	public function testStartRunPreservesConfiguredAssigneeAndAssignsOthers(): void {
+		$this->addUser('alice');
+		$this->addUser('bob');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Assigned', 'CHECK', true, 0, [], 'principals/users/bob');
+		$this->addTemplateStep($section->getId(), 'Unassigned', 'TEXT', false, 1);
+
+		$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Run']);
+
+		$steps = array_values($this->runSteps);
+		usort($steps, static fn (RunStep $a, RunStep $b): int => $a->getPosition() <=> $b->getPosition());
+		self::assertSame('bob', $steps[0]->getAssigneeId());
+		self::assertSame(PrincipalType::User->value, $steps[0]->getAssigneeType());
+		self::assertSame('alice', $steps[1]->getAssigneeId());
+	}
+
+	public function testStartRunRecordsAutomaticAssignmentInActivity(): void {
+		$this->addUser('alice');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Unassigned', 'CHECK', true, 0);
+
+		$run = $this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Run']);
+
+		$assignmentEvents = array_values(array_filter(
+			$this->activityEvents,
+			static fn (ActivityEvent $event): bool => $event->getRunId() === $run->getId()
+				&& $event->getEventType() === ActivityType::StepAssignmentChanged->value,
+		));
+
+		self::assertCount(1, $assignmentEvents);
+		self::assertNotNull($assignmentEvents[0]->getStepId());
+		self::assertSame('alice', $assignmentEvents[0]->getActorUid());
+		self::assertSame('alice', $assignmentEvents[0]->getMetadataArray()['assigneeId']);
+		self::assertTrue($assignmentEvents[0]->getMetadataArray()['automatic']);
+	}
+
+	public function testStartRunSnapshotPreservesNumberUnit(): void {
+		$this->addUser('alice');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Wait', 'NUMBER', false, 0, ['unit' => 'minutes']);
+
+		$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Run']);
+
+		$runStep = array_values($this->runSteps)[0];
+		self::assertSame(['unit' => 'minutes'], $runStep->getConfigArray());
+	}
+
+	public function testStartRunSnapshotPreservesMissingNumberUnit(): void {
+		$this->addUser('alice');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Count', 'NUMBER', false, 0);
+
+		$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Run']);
+
+		$runStep = array_values($this->runSteps)[0];
+		self::assertSame([], $runStep->getConfigArray());
 	}
 
 	public function testStartRunIgnoresInvalidLegacyDueOffset(): void {

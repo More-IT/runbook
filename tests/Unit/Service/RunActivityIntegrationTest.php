@@ -98,6 +98,28 @@ class RunActivityIntegrationTest extends RunTestBase {
 		self::assertSame([ActivityType::RunAclChanged->value], $events);
 	}
 
+	public function testActivityOrderingCanBeRequested(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$activity = $this->activityServiceFor('alice');
+		$activity->record($run->getId(), null, ActivityType::RunStarted);
+		$activity->record($run->getId(), null, ActivityType::RunCompleted);
+
+		$newest = $this->runServiceFor('alice')->listActivity($run->getId(), null);
+		$oldest = $this->runServiceFor('alice')->listActivity($run->getId(), null, 'asc');
+
+		self::assertSame(ActivityType::RunCompleted->value, $newest[0]->getEventType());
+		self::assertSame(ActivityType::RunStarted->value, $oldest[0]->getEventType());
+	}
+
+	public function testInvalidActivityOrderIsRejected(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+
+		$this->expectException(\OCA\Runbook\Service\ValidationException::class);
+		$this->runServiceFor('alice')->listActivity($run->getId(), null, 'sideways');
+	}
+
 	public function testViewerCanListActivityThroughRunService(): void {
 		$this->addUser('alice');
 		$this->addUser('bob');

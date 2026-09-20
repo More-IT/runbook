@@ -18,7 +18,7 @@ import * as api from '../services/runs.ts'
 import { apiErrorMessage } from '../utils/apiError.ts'
 
 const emit = defineEmits<{
-	open: [id: number]
+	open: [id: number, stepId: number | null]
 }>()
 
 const filter = ref<MyWorkFilter>('all')
@@ -106,7 +106,7 @@ function formatDate(timestamp: number): string {
 		<ul v-else class="runbook-list">
 			<li v-for="item in work" :key="item.stepId" class="runbook-list__item">
 				<div class="runbook-list__main">
-					<button type="button" class="runbook-list__title" @click="emit('open', item.runId)">
+					<button type="button" class="runbook-list__title" @click="emit('open', item.runId, item.stepId)">
 						{{ item.stepTitle }}
 					</button>
 					<div class="runbook-list__meta">
@@ -121,7 +121,7 @@ function formatDate(timestamp: number): string {
 					</div>
 				</div>
 				<div class="runbook-list__actions">
-					<NcButton @click="emit('open', item.runId)">
+					<NcButton @click="emit('open', item.runId, item.stepId)">
 						{{ t('runbook', 'Open') }}
 					</NcButton>
 				</div>

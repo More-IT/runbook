@@ -130,7 +130,18 @@ class WidgetTest extends TestCase {
 
 		$result = $this->widget()->getItemsV2('bob', null, 7);
 
-		self::assertSame('4 active, 2 overdue, 2 due today', $result->getEmptyContentMessage());
+		// The summary is the "half empty" message rendered above the list.
+		self::assertSame('4 active, 2 overdue, 2 due today', $result->getHalfEmptyContentMessage());
+	}
+
+	public function testEmptyMessageIsNotShownWhenWorkExists(): void {
+		$this->work->method('myWorkForUser')->willReturn([$this->item(1, 'A', false, true)]);
+
+		$result = $this->widget()->getItemsV2('bob', null, 7);
+
+		self::assertCount(1, $result->getItems());
+		self::assertStringNotContainsString('No assigned work', $result->getHalfEmptyContentMessage());
+		self::assertStringContainsString('1 active', $result->getHalfEmptyContentMessage());
 	}
 
 	public function testEmptyState(): void {
@@ -139,7 +150,20 @@ class WidgetTest extends TestCase {
 		$result = $this->widget()->getItemsV2('bob', null, 7);
 
 		self::assertSame([], $result->getItems());
-		self::assertSame('No assigned work right now.', $result->getHalfEmptyContentMessage());
+		self::assertSame('No assigned work right now.', $result->getEmptyContentMessage());
+	}
+
+	public function testItemSubtitleShowsRunAndActualDueDate(): void {
+		$dueAt = 1893456000; // 2030-01-01
+		$this->work->method('myWorkForUser')->willReturn([$this->item(1, 'Deploy', false, false, $dueAt)]);
+
+		$result = $this->widget()->getItemsV2('bob', null, 7);
+
+		/** @var WidgetItem $item */
+		$item = $result->getItems()[0];
+		self::assertSame('Deploy', $item->getTitle());
+		self::assertStringContainsString('Run', $item->getSubtitle());
+		self::assertStringContainsString(date('Y-m-d', $dueAt), $item->getSubtitle());
 	}
 
 	public function testItemLinksToRun(): void {

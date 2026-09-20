@@ -17,6 +17,7 @@ use OCA\Runbook\Db\TemplateMapper;
 use OCA\Runbook\Db\TemplateSectionMapper;
 use OCA\Runbook\Db\TemplateStepMapper;
 use OCA\Runbook\Enum\ActivityType;
+use OCA\Runbook\Enum\PrincipalType;
 use OCA\Runbook\Enum\RunStatus;
 use OCA\Runbook\Enum\RunStepStatus;
 use OCA\Runbook\Enum\TemplateStatus;
@@ -128,7 +129,9 @@ class RunService {
 
 		/** @var list<RunStep> $assignedSteps */
 		$assignedSteps = [];
-		$stored = $this->transactionRunner->run(function () use ($template, $run, $now, $dueAt, &$assignedSteps): Run {
+		/** @var list<RunStep> $autoAssignedSteps */
+		$autoAssignedSteps = [];
+		$stored = $this->transactionRunner->run(function () use ($template, $run, $now, $dueAt, &$assignedSteps, &$autoAssignedSteps, $uid): Run {
 			$stored = $this->runs->insert($run);
 
 			foreach ($this->templateSections->findByTemplate($template->getId()) as $section) {
@@ -153,11 +156,17 @@ class RunService {
 					$runStep->setConfigArray($step->getConfigArray());
 					$runStep->setStatus(RunStepStatus::Pending->value);
 
+					// Unassigned template steps are assigned to the user who
+					// starts the run, so every step has an owner and appears in
+					// "My Work". Steps with a configured assignee keep it.
 					$assignee = $this->resolveDefaultAssignee($step->getDefaultAssignee());
-					if ($assignee !== null) {
-						$runStep->setAssigneeType($assignee['type']->value);
-						$runStep->setAssigneeId($assignee['id']);
+					$autoAssigned = false;
+					if ($assignee === null) {
+						$assignee = ['type' => PrincipalType::User, 'id' => $uid];
+						$autoAssigned = true;
 					}
+					$runStep->setAssigneeType($assignee['type']->value);
+					$runStep->setAssigneeId($assignee['id']);
 
 					$dueMinutes = $this->parseDueOffsetMinutes($step->getDueOffset());
 					if ($dueMinutes !== null) {
@@ -172,6 +181,9 @@ class RunService {
 					if ($runStep->getAssigneeType() !== null && $runStep->getAssigneeId() !== null) {
 						$assignedSteps[] = $runStep;
 					}
+					if ($autoAssigned) {
+						$autoAssignedSteps[] = $runStep;
+					}
 				}
 			}
 
@@ -179,6 +191,20 @@ class RunService {
 		});
 
 		$this->activity->record($stored->getId(), null, ActivityType::RunStarted, ['title' => $title], $uid);
+
+		foreach ($autoAssignedSteps as $autoAssignedStep) {
+			$this->activity->record(
+				$stored->getId(),
+				$autoAssignedStep->getId(),
+				ActivityType::StepAssignmentChanged,
+				[
+					'automatic' => true,
+					'assigneeType' => $autoAssignedStep->getAssigneeType(),
+					'assigneeId' => $autoAssignedStep->getAssigneeId(),
+				],
+				$uid,
+			);
+		}
 
 		foreach ($assignedSteps as $assignedStep) {
 			$this->notifications->notifyStepAssigned($stored, $assignedStep, $uid);
@@ -226,14 +252,19 @@ class RunService {
 	}
 
 	/**
-	 * Activity history of a run the current user may view, newest first.
+	 * Activity history of a run the current user may view.
 	 *
+	 * @param string|null $order 'asc' or 'desc'; defaults to 'desc' (newest first).
 	 * @return list<ActivityEvent>
 	 */
-	public function listActivity(int $runId, ?int $limit): array {
+	public function listActivity(int $runId, ?int $limit, ?string $order = null): array {
 		$this->requireAccessibleRun($runId);
 
-		return $this->activity->listForRun($runId, $limit, true);
+		if ($order !== null && $order !== 'asc' && $order !== 'desc') {
+			throw new ValidationException('invalid_order');
+		}
+
+		return $this->activity->listForRun($runId, $limit, $order !== 'asc');
 	}
 
 	/**

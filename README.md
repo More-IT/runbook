@@ -77,6 +77,20 @@ Milestone 7 — Administration settings:
 - Feature toggles for the Dashboard widget, notifications and Unified Search.
 - A retention period setting that is stored only (no automatic deletion yet).
 
+Milestone 0.1.1 — Production fixes:
+
+- Unassigned steps are assigned to the user who starts the run, so every step
+  has an owner and appears in "My Work".
+- The Dashboard widget reuses the exact "My Work" data and shows the correct
+  empty state only when there is genuinely no assigned work.
+- Boolean responses are shown as translated human-readable values instead of
+  `true`/`false`.
+- Configured `NUMBER` units are shown in the template editor, run step card,
+  response field and submitted response, and survive snapshotting.
+- The navigation logo stays visible on dark themes.
+- Opening a "My Work" item navigates to and highlights the matching step.
+- The activity timeline can be switched between newest-first and oldest-first.
+
 > Recurring runs, conditional steps, template import/export, calendar, Talk,
 > webhooks, API tokens, automation and AI are **not** implemented.
 
@@ -118,6 +132,8 @@ A run has its own access list with two assignable roles:
   principal to a run does **not** assign every step.
 - A user or group assigned to a step can view the run and execute that step
   only within the run owner's consent.
+- Steps without a configured assignee are assigned to the user who starts the
+  run. A configured assignee is always preserved.
 - Assigning a step grants participant access to the run; removing an
   assignment never deletes historical execution data.
 - The strongest role wins (OWNER > PARTICIPANT > VIEWER).
@@ -456,7 +472,8 @@ Step states are `PENDING`, `IN_PROGRESS`, `COMPLETED` and `SKIPPED`:
 Starting a run copies the template structure into independent run records. The
 snapshot stores the source template id and version, the run title and
 description, section titles and order and step titles, types, required flags,
-configuration and order. The copied data is authoritative for execution:
+configuration (including the configured `NUMBER` unit) and order. The copied
+data is authoritative for execution:
 
 - later changes to the template never modify an existing run;
 - a run stays readable if its source template is archived or deleted;
@@ -483,10 +500,20 @@ run completion but stays visibly marked as skipped. Run progress is calculated
 from the steps (`PENDING` and `IN_PROGRESS` count as pending); it is never
 persisted.
 
+The storage format of a response is always the raw value (`true`/`false` for
+booleans, a number for `NUMBER`, a string for the other types), but the user
+interface never exposes raw booleans. `CONFIRMATION` responses render as
+"Confirmed"/"Not confirmed" and `CHECK` responses as "Yes"/"No". `NUMBER`
+responses render with their configured unit when one exists (for example
+`15 minutes` or `80 %`); without a unit the plain value is shown. Units are set
+in the template step editor and copied into the run snapshot.
+
 ## My Work and overview
 
 `GET /api/v1/my-work` returns steps assigned directly to the current user or to
-one of their groups. The `filter` query parameter accepts:
+one of their groups. Steps that were unassigned in the template and assigned to
+the starter when the run began are included as well. The `filter` query
+parameter accepts:
 
 - `all` — active (pending or in progress) work on active runs;
 - `today` — active work due today;
@@ -549,10 +576,12 @@ record the actor, timestamp, optional step and a small metadata payload. Storage
 paths, file contents and comment bodies are never persisted in activity rows.
 
 Recorded events include run start/completion/cancellation/reopen, run participant
-changes, step assignment changes, step start/response/complete/skip/reopen,
+changes, step assignment changes (including the automatic assignment of
+unassigned steps when a run starts), step start/response/complete/skip/reopen,
 comment add/edit/delete and evidence upload/delete. The run activity endpoint
-returns the newest events first (default 100, maximum 200) and requires read
-access to the run.
+requires read access to the run and returns at most 200 events (default 100).
+The `order` query parameter accepts `desc` (newest first, the default) or `asc`
+(oldest first); the run detail view exposes a control to switch between them.
 
 ## Notifications
 
@@ -595,7 +624,11 @@ assigned work using the same `WorkService` that powers "My Work":
 - one link per item to the relevant run and a button to the "My Work" view.
 
 The widget reuses the existing access rules, so inaccessible runs are never
-shown. When there is no assigned work it renders a translated empty state.
+shown. It uses the same effective data and filtering (the `all` filter of
+`WorkService`) as "My Work", so a real run/step pair and its actual due date are
+shown whenever pending work exists. The translated "No assigned work right
+now." empty state is rendered only when there are no assigned pending steps; it
+is never shown while work exists.
 
 ## Unified Search
 
@@ -845,11 +878,38 @@ the typed Nextcloud app configuration API.
 
 ## Release
 
-- **Version:** 0.1.0 (`appinfo/info.xml`, `package.json`).
+- **Version:** 0.1.1 (`appinfo/info.xml`, `package.json`).
 - **Nextcloud:** 33.
 - **PHP:** 8.2 – 8.5.
 - **Databases:** MySQL/MariaDB, PostgreSQL and SQLite.
 - **License:** AGPL-3.0-or-later.
+
+### v0.1.1
+
+Production fixes discovered during real use. This release is migration-free: no
+database schema change and no new migration were introduced.
+
+- **Automatic assignment:** steps without a configured assignee are assigned to
+  the user who starts the run; configured assignees are preserved. The
+  assignment is persisted in the run snapshot, appears in "My Work" and is
+  recorded in the activity history.
+- **Dashboard widget:** uses the same effective data and filtering as "My Work"
+  and shows the real run/step information with the actual due date. The empty
+  state ("No assigned work right now.") is shown only when there is no assigned
+  pending work.
+- **Confirmation responses:** boolean responses are rendered as translated,
+  human-readable values ("Confirmed"/"Not confirmed", "Yes"/"No"); the API keeps
+  storing booleans.
+- **NUMBER step units:** the configured unit is shown in the step editor, run
+  step card, response field and submitted response (for example `15 minutes`),
+  and survives template snapshotting.
+- **Dark-theme navigation icon:** a dedicated theme-compatible white icon keeps
+  the Runbook logo visible in the main navigation on dark themes.
+- **My Work deep-link focus:** opening an item from "My Work" navigates to the
+  matching run and step, scrolls to it and applies an accessible highlight,
+  including after a reload.
+- **Activity ordering:** the activity timeline can be switched between
+  newest-first (default) and oldest-first.
 
 ### Build and test
 
@@ -882,7 +942,7 @@ php build/create-package.php
 ```
 
 `build/create-package.php` writes a staging tree with runtime files only and
-creates `runbook-0.1.0.tar.gz` (archive root `runbook/`). It validates the
+creates `runbook-0.1.1.tar.gz` (archive root `runbook/`). It validates the
 staging tree with `build/validate-package.php` before archiving. Validate an
 existing tree at any time with `composer package:check`.
 
