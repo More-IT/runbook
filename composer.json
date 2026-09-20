@@ -1,0 +1,55 @@
+{
+    "name": "nextcloud/runbook",
+    "description": "Create, execute and track repeatable procedures as structured, collaborative runbooks.",
+    "license": "AGPL-3.0-or-later",
+    "type": "project",
+    "authors": [
+        {
+            "name": "More-IT"
+        }
+    ],
+    "require": {
+        "php": "^8.2"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.95",
+        "nextcloud/coding-standard": "^1.5",
+        "nextcloud/ocp": "^33.0",
+        "phpstan/phpstan": "^2.2",
+        "phpunit/phpunit": "^11.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "OCA\\Runbook\\": "lib/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "OCA\\Runbook\\Tests\\": "tests/",
+            "OCP\\": "vendor/nextcloud/ocp/OCP/",
+            "NCU\\": "vendor/nextcloud/ocp/NCU/"
+        },
+        "files": [
+            "build/stubs/doctrine-dbal.php",
+            "build/stubs/doctrine-dbal-platform.php",
+            "build/stubs/doctrine-dbal-schema.php"
+        ]
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "scripts": {
+        "lint:php": "php-cs-fixer fix --dry-run --diff",
+        "lint:php:fix": "php-cs-fixer fix",
+        "lint:php:syntax": "php build/php-lint.php",
+        "phpstan": "phpstan analyse --memory-limit=1G",
+        "test": "phpunit",
+        "test:unit": "phpunit --testsuite unit",
+        "test:migration": "phpunit --filter MigrationSchema",
+        "test:security": "phpunit --filter \"Authorization|Hardening|Notification\"",
+        "validate:xml": "php build/validate-xml.php",
+        "validate:json": "php build/validate-json.php",
+        "package:check": "php build/validate-package.php"
+    }
+}

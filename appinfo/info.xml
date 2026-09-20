@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>runbook</id>
+    <name>Runbook</name>
+    <summary>Create, execute and track repeatable procedures as structured, collaborative runbooks.</summary>
+    <description><![CDATA[# Runbook
+
+**Runbook** is a Nextcloud application for creating, executing and tracking repeatable procedures.
+
+It transforms static checklists and procedural documents into structured, collaborative workflows that teams can execute consistently and trace from start to finish.
+
+Teams can create reusable runbook templates for operational procedures such as server deployments, employee onboarding, maintenance routines, security reviews, production releases, audits, month-end processes and any other repeatable activity.
+
+Each runbook execution creates an independent historical snapshot of the procedure. Steps can be assigned to users, completed individually, supplied with structured responses, comments and supporting evidence, while Runbook maintains a complete activity history of the execution.
+
+Runbook integrates naturally with Nextcloud users and groups for access control, assignments and collaboration while keeping its own data model and business logic isolated from the rest of the platform.
+
+Its purpose is simple:
+
+**Turn procedures into repeatable, accountable and traceable execution.**
+
+### Core capabilities
+
+Runbook allows teams to:
+
+- Create reusable procedure templates with sections and ordered steps.
+- Start independent runs from published templates.
+- Assign runs and individual steps to Nextcloud users.
+- Share templates and runs with Nextcloud users and groups.
+- Collect confirmations, text, numbers, dates, selections and files during execution.
+- Add comments and operational evidence.
+- Track progress, deadlines and overdue work.
+- Maintain a complete execution history.
+- Search templates and runs through Nextcloud.
+- Surface assigned work from the Nextcloud Dashboard.
+- Configure application policies from Nextcloud Administration Settings.
+- Use the application in multiple languages through the standard Nextcloud translation system.
+
+Runbook does not modify Nextcloud users, groups or global permissions. Nextcloud identities are only referenced for authentication, assignment and access control.
+
+Runbook is designed to be useful for IT, operations, HR, finance, quality, security, customer service, facilities and any other team that relies on repeatable procedures.]]></description>
+    <version>0.1.0</version>
+    <licence>agpl</licence>
+    <author>More-IT</author>
+    <namespace>Runbook</namespace>
+    <category>tools</category>
+    <dependencies>
+        <nextcloud min-version="33" max-version="33"/>
+        <php min-version="8.2" max-version="8.5"/>
+        <database>mysql</database>
+        <database>pgsql</database>
+        <database>sqlite</database>
+    </dependencies>
+    <navigations>
+        <navigation>
+            <name>Runbook</name>
+            <route>runbook.page.index</route>
+            <order>100</order>
+        </navigation>
+    </navigations>
+    <settings>
+        <admin>OCA\Runbook\Settings\Admin</admin>
+        <admin-section>OCA\Runbook\Settings\Section</admin-section>
+    </settings>
+</info>

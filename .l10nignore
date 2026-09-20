@@ -1,0 +1,8 @@
+# Compiled frontend bundle
+js/
+
+# Composer dependencies
+vendor/
+
+# Node dependencies
+node_modules/

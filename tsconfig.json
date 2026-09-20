@@ -1,0 +1,21 @@
+{
+	"compilerOptions": {
+		"target": "ESNext",
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"lib": ["ESNext", "DOM", "DOM.Iterable"],
+		"types": ["vite/client"],
+		"jsx": "preserve",
+		"strict": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"isolatedModules": true,
+		"verbatimModuleSyntax": true,
+		"resolveJsonModule": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true,
+		"useDefineForClassFields": true
+	},
+	"include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue", "vite.config.ts"]
+}

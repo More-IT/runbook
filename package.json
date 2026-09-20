@@ -1,0 +1,40 @@
+{
+  "name": "runbook",
+  "version": "0.1.0",
+  "description": "Create, execute and track repeatable procedures as structured, collaborative runbooks.",
+  "license": "AGPL-3.0-or-later",
+  "private": true,
+  "type": "module",
+  "browserslist": [
+    "extends @nextcloud/browserslist-config"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch --mode development",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@nextcloud/axios": "^2.6.0",
+    "@nextcloud/l10n": "^3.4.1",
+    "@nextcloud/router": "^3.2.0",
+    "@nextcloud/vue": "^9.13.0",
+    "vue": "^3.5.43"
+  },
+  "devDependencies": {
+    "@nextcloud/browserslist-config": "^3.0.1",
+    "@nextcloud/eslint-config": "^9.0.1",
+    "@nextcloud/vite-config": "^2.5.4",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "eslint": "^10.11.0",
+    "sass": "^1.104.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
+  },
+  "engines": {
+    "node": ">=20",
+    "npm": ">=10"
+  }
+}

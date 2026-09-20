@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend (Node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+  php:
+    name: PHP ${{ matrix.php-versions }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php-versions: ['8.2', '8.3', '8.4', '8.5']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-versions }}
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: PHP syntax lint
+        run: composer lint:php:syntax
+
+      - name: Coding style
+        run: composer lint:php
+
+      - name: Static analysis
+        run: composer phpstan
+
+      - name: Unit tests
+        run: composer test
+
+  migration-and-security:
+    name: Migration and security tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.3
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Validate composer.json
+        run: composer validate --no-check-publish --no-check-version
+
+      - name: Validate XML metadata
+        run: composer validate:xml
+
+      - name: Validate JSON and translations
+        run: composer validate:json
+
+      - name: Migration and schema tests
+        run: composer test:migration
+
+      - name: Security regression tests
+        run: composer test:security
+
+  packaging:
+    name: Packaging validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.3
+          coverage: none
+          tools: composer:v2
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Validate package
+        run: composer package:check

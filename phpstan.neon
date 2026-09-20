@@ -1,0 +1,10 @@
+parameters:
+    level: 8
+    paths:
+        - lib
+        - tests
+    scanFiles:
+        - build/stubs/doctrine-dbal.php
+        - build/stubs/doctrine-dbal-platform.php
+        - build/stubs/doctrine-dbal-schema.php
+    treatPhpDocTypesAsCertain: false

@@ -1,0 +1,123 @@
+/**
+ * SPDX-FileCopyrightText: 2026 More-IT
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
+import { translate as t } from '@nextcloud/l10n'
+
+interface ApiErrorBody {
+	error?: string
+	reason?: string
+	message?: string
+}
+
+const REASON_MESSAGES: Record<string, string> = {
+	template_title_required: t('runbook', 'A template needs a title before it can be published.'),
+	title_required: t('runbook', 'A title is required.'),
+	title_too_long: t('runbook', 'The title is too long.'),
+	description_too_long: t('runbook', 'The description is too long.'),
+	section_title_required: t('runbook', 'A section needs a title.'),
+	step_title_required: t('runbook', 'A step needs a title.'),
+	invalid_step_type: t('runbook', 'The selected step type is not supported.'),
+	step_type_required: t('runbook', 'A step type is required.'),
+	select_options_required: t('runbook', 'A selection step needs at least one option.'),
+	invalid_select_option: t('runbook', 'The selection is invalid.'),
+	invalid_unit: t('runbook', 'The unit is invalid.'),
+	config_too_large: t('runbook', 'The step configuration is too large.'),
+	template_archived: t('runbook', 'Archived templates cannot be edited.'),
+	template_already_archived: t('runbook', 'This template is already archived.'),
+	not_owner: t('runbook', 'You are not allowed to perform this action.'),
+	not_allowed: t('runbook', 'You are not allowed to perform this action.'),
+	unknown_user: t('runbook', 'The selected user does not exist.'),
+	unknown_group: t('runbook', 'The selected group does not exist.'),
+	duplicate_principal: t('runbook', 'The same user or group was added more than once.'),
+	owner_role_not_allowed: t('runbook', 'Ownership cannot be assigned through access control.'),
+	invalid_principal_type: t('runbook', 'The selected principal type is not supported.'),
+	invalid_principal_id: t('runbook', 'The selected user or group is invalid.'),
+	empty_principal_id: t('runbook', 'Select a user or group first.'),
+	invalid_role: t('runbook', 'The selected access role is not supported.'),
+	invalid_acl_entries: t('runbook', 'The access list is invalid.'),
+	invalid_acl_entry: t('runbook', 'The access list is invalid.'),
+	invalid_due_offset: t('runbook', 'The due offset must be a non-negative number of minutes.'),
+	due_date_in_past: t('runbook', 'The due date must be in the future.'),
+	step_due_after_run_due: t('runbook', 'A step due date cannot be later than the run due date.'),
+	invalid_filter: t('runbook', 'The selected filter is invalid.'),
+	template_not_published: t('runbook', 'Only published templates can be used to start a run.'),
+	run_title_required: t('runbook', 'A run needs a title.'),
+	run_not_found: t('runbook', 'The run was not found.'),
+	run_not_active: t('runbook', 'This run is read-only.'),
+	run_not_completed: t('runbook', 'Only completed runs can be reopened.'),
+	required_steps_unresolved: t('runbook', 'Some required steps are still unresolved.'),
+	invalid_step_transition: t('runbook', 'This step action is not allowed in the current state.'),
+	run_step_not_found: t('runbook', 'The run step was not found.'),
+	run_section_not_found: t('runbook', 'The run section was not found.'),
+	response_required: t('runbook', 'A response is required before this step can be completed.'),
+	invalid_boolean_response: t('runbook', 'This step expects a yes or no response.'),
+	invalid_text_response: t('runbook', 'This step expects a text response.'),
+	invalid_number_response: t('runbook', 'This step expects a numeric response.'),
+	invalid_select_response: t('runbook', 'This step expects one of the configured options.'),
+	invalid_date_response: t('runbook', 'This step expects a valid date.'),
+	invalid_user_response: t('runbook', 'This step expects a valid Nextcloud user.'),
+	response_too_long: t('runbook', 'The response is too long.'),
+	skip_reason_required: t('runbook', 'A skip reason is required.'),
+	skip_reason_too_long: t('runbook', 'The skip reason is too long.'),
+	file_upload_not_supported: t('runbook', 'Evidence upload is not available yet.'),
+	not_authenticated: t('runbook', 'You need to be signed in.'),
+	template_not_found: t('runbook', 'The template was not found.'),
+	section_not_found: t('runbook', 'The section was not found.'),
+	step_not_found: t('runbook', 'The step was not found.'),
+	invalid_position: t('runbook', 'The requested position is invalid.'),
+	invalid_field: t('runbook', 'Some of the submitted data is invalid.'),
+	invalid_id: t('runbook', 'The submitted identifier is invalid.'),
+	template_creation_forbidden: t('runbook', 'You are not allowed to create templates.'),
+	comments_disabled: t('runbook', 'Comments are disabled by your administrator.'),
+	step_reopen_disabled: t('runbook', 'Reopening steps is disabled by your administrator.'),
+	run_reopen_disabled: t('runbook', 'Reopening runs is disabled by your administrator.'),
+	attachment_too_large: t('runbook', 'The file is larger than the allowed attachment size.'),
+	invalid_attachment_size: t('runbook', 'The maximum attachment size is out of range.'),
+	invalid_retention_days: t('runbook', 'The retention period is out of range.'),
+	invalid_template_creation_policy: t('runbook', 'The selected template creation policy is not supported.'),
+	invalid_template_creator_groups: t('runbook', 'The selected group list is invalid.'),
+	too_many_template_creator_groups: t('runbook', 'Too many groups were selected.'),
+	invalid_boolean: t('runbook', 'A boolean setting has an invalid value.'),
+}
+
+/**
+ * Extract the error body from an unknown thrown value.
+ *
+ * @param error Unknown value thrown by the API client.
+ */
+function extractBody(error: unknown): ApiErrorBody | undefined {
+	if (typeof error !== 'object' || error === null) {
+		return undefined
+	}
+
+	const candidate = error as { response?: { data?: unknown } }
+	const data = candidate.response?.data
+	if (typeof data !== 'object' || data === null) {
+		return undefined
+	}
+
+	return data as ApiErrorBody
+}
+
+/**
+ * Turn an unknown API error into a translated, user-facing message.
+ *
+ * @param error Unknown value thrown by the API client.
+ */
+export function apiErrorMessage(error: unknown): string {
+	const body = extractBody(error)
+	if (body?.reason !== undefined) {
+		const known = REASON_MESSAGES[body.reason]
+		if (known !== undefined) {
+			return known
+		}
+	}
+
+	if (body?.message !== undefined && body.message !== '') {
+		return body.message
+	}
+
+	return t('runbook', 'Something went wrong. Please try again.')
+}

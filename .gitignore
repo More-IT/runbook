@@ -1,0 +1,17 @@
+# Dependencies
+/node_modules/
+/vendor/
+
+# Build output
+/js/
+/css/
+
+# Tooling caches
+/.phpunit.cache/
+/.php-cs-fixer.cache
+/.phpstan.cache/
+
+# Local environment
+/.idea/
+/.vscode/
+*.log
