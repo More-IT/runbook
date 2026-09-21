@@ -19,7 +19,7 @@ declare(strict_types=1);
 $options = parseOptions($argv);
 $isPackage = isset($options['package']);
 $root = $isPackage ? rtrim($options['package'], "/\\") : dirname(__DIR__);
-$expectedVersion = $options['version'] ?? '0.2.0';
+$expectedVersion = $options['version'] ?? '0.3.0';
 
 $errors = [];
 $notes = [];
@@ -72,6 +72,8 @@ $requiredFiles = [
 	'l10n/en.js',
 	'l10n/pt_PT.json',
 	'l10n/pt_PT.js',
+	'l10n/pt_BR.json',
+	'l10n/pt_BR.js',
 	'README.md',
 	'LICENSE',
 	'SECURITY.md',

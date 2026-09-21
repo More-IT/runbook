@@ -375,6 +375,7 @@ class TemplateServiceTest extends TestCase {
 			$this->aclMapper,
 			$this->permissionService,
 			$this->creationPolicy,
+			$this->groupManager,
 		);
 	}
 
@@ -879,5 +880,431 @@ class TemplateServiceTest extends TestCase {
 
 		$this->expectException(ConflictException::class);
 		$service->publishTemplate($template->getId());
+	}
+
+	public function testUnarchivePublishedTemplateRestoresPublishedStatus(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$service->publishTemplate($template->getId());
+		$service->archiveTemplate($template->getId());
+
+		$restored = $service->unarchiveTemplate($template->getId());
+
+		self::assertSame(TemplateStatus::Published->value, $restored->getStatus());
+		self::assertNull($restored->getArchivedAt());
+	}
+
+	public function testUnarchiveDraftTemplateRestoresDraftStatus(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$service->archiveTemplate($template->getId());
+
+		$restored = $service->unarchiveTemplate($template->getId());
+
+		self::assertSame(TemplateStatus::Draft->value, $restored->getStatus());
+	}
+
+	public function testUnarchiveRejectsNonOwner(): void {
+		$alice = $this->serviceFor('alice');
+		$template = $alice->createTemplate(['title' => 'Deploy']);
+		$alice->archiveTemplate($template->getId());
+
+		$this->expectException(ForbiddenException::class);
+		$this->serviceFor('bob')->unarchiveTemplate($template->getId());
+	}
+
+	public function testAdminCanUnarchiveTemplate(): void {
+		$alice = $this->serviceFor('alice');
+		$template = $alice->createTemplate(['title' => 'Deploy']);
+		$alice->archiveTemplate($template->getId());
+		$this->adminUsers[] = 'bob';
+
+		$restored = $this->serviceFor('bob')->unarchiveTemplate($template->getId());
+
+		self::assertSame(TemplateStatus::Draft->value, $restored->getStatus());
+	}
+
+	public function testUnarchiveRejectsActiveTemplate(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+
+		$this->expectException(ConflictException::class);
+		$service->unarchiveTemplate($template->getId());
+	}
+
+	public function testOwnerCanDuplicateTemplate(): void {
+		$alice = $this->serviceFor('alice');
+		$template = $alice->createTemplate(['title' => 'Deploy', 'description' => 'Steps']);
+		$section = $alice->createSection($template->getId(), ['title' => 'Prep', 'notes' => 'Note']);
+		$alice->createStep($section->getId(), ['title' => 'Check', 'type' => 'CHECK', 'required' => true]);
+
+		$copy = $alice->duplicateTemplate($template->getId());
+
+		self::assertNotSame($template->getId(), $copy->getId());
+		self::assertSame('alice', $copy->getOwner());
+		self::assertSame('Copy of Deploy', $copy->getTitle());
+		self::assertSame('Steps', $copy->getDescription());
+		self::assertSame(TemplateStatus::Draft->value, $copy->getStatus());
+		self::assertSame(1, $copy->getVersion());
+
+		$copiedSections = $alice->getSections($copy->getId());
+		self::assertCount(1, $copiedSections);
+		self::assertSame('Prep', $copiedSections[0]->getTitle());
+		self::assertSame('Note', $copiedSections[0]->getNotes());
+
+		$copiedSteps = $alice->getSteps($copiedSections[0]->getId());
+		self::assertCount(1, $copiedSteps);
+		self::assertSame('Check', $copiedSteps[0]->getTitle());
+		self::assertSame('CHECK', $copiedSteps[0]->getType());
+
+		// The original template is left completely unchanged.
+		self::assertCount(1, $alice->getSections($template->getId()));
+		self::assertSame('Deploy', $alice->getTemplate($template->getId())->getTitle());
+	}
+
+	public function testAdminCanDuplicateTemplate(): void {
+		$alice = $this->serviceFor('alice');
+		$template = $alice->createTemplate(['title' => 'Deploy']);
+		$this->adminUsers[] = 'bob';
+
+		$copy = $this->serviceFor('bob')->duplicateTemplate($template->getId());
+
+		self::assertSame('bob', $copy->getOwner());
+		self::assertSame('Copy of Deploy', $copy->getTitle());
+	}
+
+	public function testEditorCannotDuplicateTemplate(): void {
+		$alice = $this->serviceFor('alice');
+		$template = $alice->createTemplate(['title' => 'Deploy']);
+		$this->addUser('editor');
+		$this->seedAcl($template->getId(), PrincipalType::User->value, 'editor', AclRole::Editor->value);
+
+		$this->expectException(ForbiddenException::class);
+		$this->serviceFor('editor')->duplicateTemplate($template->getId());
+	}
+
+	public function testViewerCannotDuplicateTemplate(): void {
+		$alice = $this->serviceFor('alice');
+		$template = $alice->createTemplate(['title' => 'Deploy']);
+		$this->addUser('viewer');
+		$this->seedAcl($template->getId(), PrincipalType::User->value, 'viewer', AclRole::Viewer->value);
+
+		$this->expectException(ForbiddenException::class);
+		$this->serviceFor('viewer')->duplicateTemplate($template->getId());
+	}
+
+	public function testDuplicateDoesNotCopyAcl(): void {
+		$alice = $this->serviceFor('alice');
+		$template = $alice->createTemplate(['title' => 'Deploy']);
+		$this->addUser('carol');
+		$this->seedAcl($template->getId(), PrincipalType::User->value, 'carol', AclRole::Viewer->value);
+
+		$copy = $alice->duplicateTemplate($template->getId());
+
+		self::assertFalse($this->permissionService->canView($this->templates[$copy->getId()], 'carol'));
+		self::assertTrue($this->permissionService->canView($this->templates[$copy->getId()], 'alice'));
+	}
+
+	public function testSectionDependenciesArePersisted(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$first = $service->createSection($template->getId(), ['title' => 'A']);
+		$second = $service->createSection($template->getId(), ['title' => 'B', 'dependsOn' => [$first->getId()]]);
+
+		self::assertSame([$first->getId()], $second->getDependsOnIds());
+	}
+
+	public function testUnknownSectionDependencyIsRejected(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+
+		$this->expectException(ValidationException::class);
+		$service->createSection($template->getId(), ['title' => 'B', 'dependsOn' => [999]]);
+	}
+
+	public function testSelfDependencyIsRejected(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$section = $service->createSection($template->getId(), ['title' => 'A']);
+
+		$this->expectException(ValidationException::class);
+		$service->updateSection($section->getId(), ['dependsOn' => [$section->getId()]]);
+	}
+
+	public function testDependencyCycleIsRejected(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$a = $service->createSection($template->getId(), ['title' => 'A']);
+		$b = $service->createSection($template->getId(), ['title' => 'B', 'dependsOn' => [$a->getId()]]);
+
+		$this->expectException(ValidationException::class);
+		$service->updateSection($a->getId(), ['dependsOn' => [$b->getId()]]);
+	}
+
+	public function testDeletingSectionStripsDependencies(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$a = $service->createSection($template->getId(), ['title' => 'A']);
+		$b = $service->createSection($template->getId(), ['title' => 'B', 'dependsOn' => [$a->getId()]]);
+
+		$service->deleteSection($a->getId());
+
+		self::assertSame([], $service->getSections($template->getId())[0]->getDependsOnIds());
+	}
+
+	public function testConditionIsValidatedAgainstStepType(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$start = $service->createSection($template->getId(), ['title' => 'Start']);
+		$step = $service->createStep($start->getId(), ['title' => 'Approved?', 'type' => 'CONFIRMATION', 'required' => true]);
+
+		$branch = $service->createSection($template->getId(), [
+			'title' => 'Branch',
+			'condition' => ['stepId' => $step->getId(), 'operator' => 'is_true'],
+		]);
+		$condition = $branch->getCondition();
+		self::assertNotNull($condition);
+		self::assertSame('is_true', $condition['operator']);
+
+		$this->expectException(ValidationException::class);
+		$service->createSection($template->getId(), [
+			'title' => 'Bad',
+			'condition' => ['stepId' => $step->getId(), 'operator' => 'greater_than'],
+		]);
+	}
+
+	public function testSelectConditionValueMustBeAConfiguredOption(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$start = $service->createSection($template->getId(), ['title' => 'Start']);
+		$step = $service->createStep($start->getId(), [
+			'title' => 'Environment',
+			'type' => 'SELECT',
+			'required' => true,
+			'config' => ['options' => ['dev', 'prod']],
+		]);
+
+		$prod = $service->createSection($template->getId(), [
+			'title' => 'Production',
+			'condition' => ['stepId' => $step->getId(), 'operator' => 'equals', 'value' => 'prod'],
+		]);
+		$condition = $prod->getCondition();
+		self::assertNotNull($condition);
+		self::assertSame('prod', $condition['value']);
+
+		$this->expectException(ValidationException::class);
+		$service->createSection($template->getId(), [
+			'title' => 'Bad',
+			'condition' => ['stepId' => $step->getId(), 'operator' => 'equals', 'value' => 'staging'],
+		]);
+	}
+
+	public function testDuplicateConditionIsRejected(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$start = $service->createSection($template->getId(), ['title' => 'Start']);
+		$step = $service->createStep($start->getId(), ['title' => 'Approved?', 'type' => 'CONFIRMATION', 'required' => true]);
+		$condition = ['stepId' => $step->getId(), 'operator' => 'is_true'];
+
+		$service->createSection($template->getId(), ['title' => 'A', 'condition' => $condition]);
+
+		$this->expectException(ValidationException::class);
+		$service->createSection($template->getId(), ['title' => 'B', 'condition' => $condition]);
+	}
+
+	public function testMultipleAndConditionsAreStoredAsAList(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$start = $service->createSection($template->getId(), ['title' => 'Start']);
+		$approved = $service->createStep($start->getId(), ['title' => 'Approved?', 'type' => 'CONFIRMATION', 'required' => true]);
+		$environment = $service->createStep($start->getId(), [
+			'title' => 'Environment',
+			'type' => 'SELECT',
+			'required' => true,
+			'config' => ['options' => ['dev', 'prod']],
+		]);
+
+		$section = $service->createSection($template->getId(), [
+			'title' => 'Production',
+			'conditions' => [
+				['stepId' => $approved->getId(), 'operator' => 'is_true'],
+				['stepId' => $environment->getId(), 'operator' => 'equals', 'value' => 'prod'],
+			],
+		]);
+
+		$conditions = $section->getConditions();
+		self::assertCount(2, $conditions);
+		self::assertSame('is_true', $conditions[0]['operator']);
+		self::assertSame('prod', $conditions[1]['value']);
+		self::assertSame($conditions[0], $section->getCondition());
+	}
+
+	public function testContradictoryEqualityConditionsInOneGateAreRejected(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$start = $service->createSection($template->getId(), ['title' => 'Start']);
+		$environment = $service->createStep($start->getId(), [
+			'title' => 'Environment',
+			'type' => 'SELECT',
+			'required' => true,
+			'config' => ['options' => ['dev', 'prod']],
+		]);
+
+		$this->expectException(ValidationException::class);
+		$service->createSection($template->getId(), [
+			'title' => 'Impossible',
+			'conditions' => [
+				['stepId' => $environment->getId(), 'operator' => 'equals', 'value' => 'dev'],
+				['stepId' => $environment->getId(), 'operator' => 'equals', 'value' => 'prod'],
+			],
+		]);
+	}
+
+	public function testContradictoryBooleanConditionsInOneGateAreRejected(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$start = $service->createSection($template->getId(), ['title' => 'Start']);
+		$approved = $service->createStep($start->getId(), ['title' => 'Approved?', 'type' => 'CONFIRMATION', 'required' => true]);
+
+		$this->expectException(ValidationException::class);
+		$service->createSection($template->getId(), [
+			'title' => 'Impossible',
+			'conditions' => [
+				['stepId' => $approved->getId(), 'operator' => 'is_true'],
+				['stepId' => $approved->getId(), 'operator' => 'is_false'],
+			],
+		]);
+	}
+
+	public function testDuplicateConditionInsideOneGateIsRejected(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$start = $service->createSection($template->getId(), ['title' => 'Start']);
+		$approved = $service->createStep($start->getId(), ['title' => 'Approved?', 'type' => 'CONFIRMATION', 'required' => true]);
+		$condition = ['stepId' => $approved->getId(), 'operator' => 'is_true'];
+
+		$this->expectException(ValidationException::class);
+		$service->createSection($template->getId(), [
+			'title' => 'Redundant',
+			'conditions' => [$condition, $condition],
+		]);
+	}
+
+	public function testConditionsCanBeReplacedAndClearedAsAList(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$start = $service->createSection($template->getId(), ['title' => 'Start']);
+		$approved = $service->createStep($start->getId(), ['title' => 'Approved?', 'type' => 'CONFIRMATION', 'required' => true]);
+
+		$section = $service->createSection($template->getId(), ['title' => 'Branch']);
+
+		$updated = $service->updateSection($section->getId(), [
+			'conditions' => [['stepId' => $approved->getId(), 'operator' => 'is_true']],
+		]);
+		self::assertCount(1, $updated->getConditions());
+
+		$cleared = $service->updateSection($section->getId(), ['conditions' => []]);
+		self::assertSame([], $cleared->getConditions());
+	}
+
+	public function testConditionOnOwnSectionStepIsRejected(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$section = $service->createSection($template->getId(), ['title' => 'Apenas se duas forem certas']);
+		$own = $service->createStep($section->getId(), [
+			'title' => 'Tudo funciona, certo?',
+			'type' => 'CONFIRMATION',
+			'required' => true,
+		]);
+
+		try {
+			$service->updateSection($section->getId(), [
+				'conditions' => [['stepId' => $own->getId(), 'operator' => 'is_true']],
+			]);
+			self::fail('A same-section condition must be rejected');
+		} catch (ValidationException $exception) {
+			self::assertSame('condition_references_own_section', $exception->getReason());
+		}
+	}
+
+	public function testConditionOnOwnSectionStepIsRejectedForTheLegacySingleConditionPayload(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$section = $service->createSection($template->getId(), ['title' => 'ultima']);
+		$own = $service->createStep($section->getId(), ['title' => 'teste', 'type' => 'CONFIRMATION', 'required' => true]);
+
+		$this->expectException(ValidationException::class);
+		$service->updateSection($section->getId(), [
+			'condition' => ['stepId' => $own->getId(), 'operator' => 'is_true'],
+		]);
+	}
+
+	public function testConditionOnAPreviousSectionStepIsAccepted(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$first = $service->createSection($template->getId(), ['title' => 'Start']);
+		$control = $service->createStep($first->getId(), ['title' => 'Approved?', 'type' => 'CONFIRMATION', 'required' => true]);
+		$second = $service->createSection($template->getId(), ['title' => 'Ultima']);
+
+		$updated = $service->updateSection($second->getId(), [
+			'conditions' => [['stepId' => $control->getId(), 'operator' => 'is_true']],
+		]);
+
+		self::assertCount(1, $updated->getConditions());
+		self::assertSame($control->getId(), $updated->getConditions()[0]['stepId']);
+	}
+
+	public function testSectionCanBeCreatedWithAConditionOnAPreviousSectionStep(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$first = $service->createSection($template->getId(), ['title' => 'Start']);
+		$environment = $service->createStep($first->getId(), [
+			'title' => 'Environment',
+			'type' => 'SELECT',
+			'required' => true,
+			'config' => ['options' => ['dev', 'prod']],
+		]);
+
+		$production = $service->createSection($template->getId(), [
+			'title' => 'Production',
+			'conditions' => [['stepId' => $environment->getId(), 'operator' => 'equals', 'value' => 'prod']],
+		]);
+
+		self::assertCount(1, $production->getConditions());
+		self::assertSame('prod', $production->getConditions()[0]['value']);
+	}
+
+	public function testConditionReferencingAnUnknownStepIsRejected(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$start = $service->createSection($template->getId(), ['title' => 'Start']);
+		$service->createStep($start->getId(), ['title' => 'Approved?', 'type' => 'CONFIRMATION', 'required' => true]);
+
+		try {
+			$service->createSection($template->getId(), [
+				'title' => 'Branch',
+				'conditions' => [['stepId' => 999999, 'operator' => 'is_true']],
+			]);
+			self::fail('An unknown condition step must be rejected');
+		} catch (ValidationException $exception) {
+			self::assertSame('condition_step_not_found', $exception->getReason());
+		}
+	}
+
+	public function testInvalidOperatorForANumericStepIsRejected(): void {
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$start = $service->createSection($template->getId(), ['title' => 'Start']);
+		$amount = $service->createStep($start->getId(), ['title' => 'Amount', 'type' => 'NUMBER', 'required' => true]);
+		$branch = $service->createSection($template->getId(), ['title' => 'Branch']);
+
+		try {
+			$service->updateSection($branch->getId(), [
+				'conditions' => [['stepId' => $amount->getId(), 'operator' => 'is_true']],
+			]);
+			self::fail('An invalid operator for a numeric step must be rejected');
+		} catch (ValidationException $exception) {
+			self::assertSame('invalid_condition_operator', $exception->getReason());
+		}
 	}
 }

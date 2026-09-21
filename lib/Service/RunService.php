@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\Runbook\Service;
 
 use OCA\Runbook\Db\ActivityEvent;
+use OCA\Runbook\Db\AttachmentMapper;
 use OCA\Runbook\Db\Run;
 use OCA\Runbook\Db\RunAclMapper;
 use OCA\Runbook\Db\RunMapper;
@@ -23,6 +24,7 @@ use OCA\Runbook\Enum\RunStepStatus;
 use OCA\Runbook\Enum\TemplateStatus;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\IGroupManager;
 use OCP\IUserSession;
 use OCP\Security\ISecureRandom;
 
@@ -57,6 +59,10 @@ class RunService {
 		private readonly ActivityService $activity,
 		private readonly NotificationService $notifications,
 		private readonly AdminSettings $settings,
+		private readonly AttachmentMapper $attachments,
+		private readonly EvidenceStorage $evidenceStorage,
+		private readonly IGroupManager $groupManager,
+		private readonly FlowService $flow,
 	) {
 	}
 
@@ -135,6 +141,13 @@ class RunService {
 		$stored = $this->transactionRunner->run(function () use ($template, $run, $now, $dueAt, &$assignedSteps, &$autoAssignedSteps, $uid): Run {
 			$stored = $this->runs->insert($run);
 
+			/** @var array<int, int> $sectionIdMap template section id => run section id */
+			$sectionIdMap = [];
+			/** @var array<int, int> $stepIdMap template step id => run step id */
+			$stepIdMap = [];
+			/** @var list<array{0: \OCA\Runbook\Db\TemplateSection, 1: RunSection}> $createdSections */
+			$createdSections = [];
+
 			foreach ($this->templateSections->findByTemplate($template->getId()) as $section) {
 				$runSection = new RunSection();
 				$runSection->setRunId($stored->getId());
@@ -144,6 +157,8 @@ class RunService {
 				$runSection->setNotes($section->getNotes());
 				$runSection->setPosition($section->getPosition());
 				$storedSection = $this->runSections->insert($runSection);
+				$sectionIdMap[$section->getId()] = $storedSection->getId();
+				$createdSections[] = [$section, $storedSection];
 
 				foreach ($this->templateSteps->findBySection($section->getId()) as $step) {
 					$runStep = new RunStep();
@@ -179,7 +194,8 @@ class RunService {
 						$runStep->setDueAt($stepDueAt);
 					}
 
-					$this->runSteps->insert($runStep);
+					$storedStep = $this->runSteps->insert($runStep);
+					$stepIdMap[$step->getId()] = $storedStep->getId();
 					if ($runStep->getAssigneeType() !== null && $runStep->getAssigneeId() !== null) {
 						$assignedSteps[] = $runStep;
 					}
@@ -187,6 +203,30 @@ class RunService {
 						$autoAssignedSteps[] = $runStep;
 					}
 				}
+			}
+
+			// Second pass: the flow configuration references template section and
+			// step ids, which only exist for the run after the first pass.
+			foreach ($createdSections as [$templateSection, $runSection]) {
+				$dependsOn = [];
+				foreach ($templateSection->getDependsOnIds() as $depId) {
+					if (isset($sectionIdMap[$depId])) {
+						$dependsOn[] = $sectionIdMap[$depId];
+					}
+				}
+
+				$mappedConditions = [];
+				foreach ($templateSection->getConditions() as $condition) {
+					$sourceStepId = (int)($condition['stepId'] ?? 0);
+					if (isset($stepIdMap[$sourceStepId])) {
+						$condition['stepId'] = $stepIdMap[$sourceStepId];
+						$mappedConditions[] = $condition;
+					}
+				}
+
+				$runSection->setDependsOnIds($dependsOn);
+				$runSection->setConditions($mappedConditions);
+				$this->runSections->update($runSection);
 			}
 
 			return $stored;
@@ -304,7 +344,7 @@ class RunService {
 	}
 
 	/**
-	 * @return array{run: Run, sections: list<array{section: RunSection, steps: list<RunStep>}>, progress: array{total: int, completed: int, skipped: int, pending: int, percentage: int, canComplete: bool}, permissions: array{uid: string, role: string|null, canManage: bool, canModify: bool, canCancel: bool, canReopen: bool, canManageAssignments: bool, canComment: bool, executableStepIds: list<int>}}
+	 * @return array{run: Run, sections: list<array{section: RunSection, steps: list<RunStep>, state: string, blockedBy: list<string>, reason: list<array<string, mixed>>}>, progress: array{total: int, completed: int, skipped: int, pending: int, percentage: int, canComplete: bool}, permissions: array{uid: string, role: string|null, canManage: bool, canModify: bool, canCancel: bool, canReopen: bool, canManageAssignments: bool, canComment: bool, canDelete: bool, executableStepIds: list<int>}}
 	 */
 	public function getRunDetail(int $id): array {
 		$run = $this->requireAccessibleRun($id);
@@ -319,22 +359,49 @@ class RunService {
 			}
 		}
 
+		$flow = $this->flow->evaluate(
+			array_map(static fn (array $entry): RunSection => $entry['section'], $sections),
+			$allSteps,
+		);
+		$unavailableStepIds = array_values(array_unique(array_merge(
+			$flow['blockedStepIds'],
+			$flow['inapplicableStepIds'],
+		)));
+
+		$flowSections = [];
+		foreach ($sections as $entry) {
+			$sectionId = $entry['section']->getId();
+			$flowSections[] = [
+				'section' => $entry['section'],
+				'steps' => $entry['steps'],
+				'state' => $flow['states'][$sectionId] ?? FlowService::STATE_AVAILABLE,
+				'blockedBy' => $flow['blockedBy'][$sectionId] ?? [],
+				'reason' => $flow['reasons'][$sectionId] ?? [],
+			];
+		}
+
 		return [
 			'run' => $run,
-			'sections' => $sections,
-			'progress' => $this->calculateProgress($run, $allSteps),
-			'permissions' => $this->getPermissions($run, $allSteps),
+			'sections' => $flowSections,
+			'progress' => $this->calculateProgress($run, $allSteps, $flow['inapplicableStepIds']),
+			'permissions' => $this->getPermissions($run, $allSteps, $unavailableStepIds),
 		];
 	}
 
 	/**
 	 * @param list<RunStep> $steps
-	 * @return array{uid: string, role: string|null, canManage: bool, canModify: bool, canCancel: bool, canReopen: bool, canManageAssignments: bool, canComment: bool, executableStepIds: list<int>}
+	 * @param list<int> $unavailableStepIds Steps in blocked/inapplicable sections.
+	 * @return array{uid: string, role: string|null, canManage: bool, canModify: bool, canCancel: bool, canReopen: bool, canManageAssignments: bool, canComment: bool, canDelete: bool, executableStepIds: list<int>}
 	 */
-	public function getPermissions(Run $run, array $steps): array {
+	public function getPermissions(Run $run, array $steps, array $unavailableStepIds = []): array {
 		$uid = $this->currentUserId();
 		$isOwner = $this->access->isOwner($run, $uid);
 		$isActive = $run->getStatus() === RunStatus::Active->value;
+
+		$executableStepIds = $this->access->executableStepIds($run, $steps, $uid);
+		if ($unavailableStepIds !== []) {
+			$executableStepIds = array_values(array_diff($executableStepIds, $unavailableStepIds));
+		}
 
 		return [
 			'uid' => $uid,
@@ -345,7 +412,8 @@ class RunService {
 			'canReopen' => $isOwner && $run->getStatus() === RunStatus::Completed->value,
 			'canManageAssignments' => $isOwner && $isActive,
 			'canComment' => $isActive && $this->access->canComment($run, $uid),
-			'executableStepIds' => $this->access->executableStepIds($run, $steps, $uid),
+			'canDelete' => $isOwner || $this->groupManager->isAdmin($uid),
+			'executableStepIds' => $executableStepIds,
 		];
 	}
 
@@ -394,6 +462,64 @@ class RunService {
 		], $this->currentUserId());
 
 		return $section;
+	}
+
+	/**
+	 * Return every completed or skipped step of a run section to execution.
+	 *
+	 * Only the run owner may do this while the run is active, and a reason is
+	 * mandatory. Responses, evidence and activity are preserved; dependencies
+	 * and conditions are re-evaluated automatically because flow state is
+	 * derived from the current snapshot.
+	 *
+	 * @param array<string, mixed> $data
+	 * @return list<RunStep>
+	 */
+	public function returnSection(int $sectionId, array $data): array {
+		try {
+			$section = $this->runSections->find($sectionId);
+		} catch (DoesNotExistException) {
+			throw new NotFoundException('run_section_not_found');
+		}
+
+		$run = $this->requireOwnedRun($section->getRunId());
+		if ($run->getStatus() !== RunStatus::Active->value) {
+			throw new ConflictException('run_not_active');
+		}
+
+		$reason = trim($this->readString($data, 'reason') ?? '');
+		if ($reason === '') {
+			throw new ValidationException('return_reason_required');
+		}
+
+		$now = $this->timeFactory->getTime();
+		$returned = [];
+		foreach ($this->runSteps->findBySection($sectionId) as $step) {
+			$status = RunStepStatus::tryFrom($step->getStatus());
+			if ($status !== RunStepStatus::Completed && $status !== RunStepStatus::Skipped) {
+				continue;
+			}
+			$step->setStatus(RunStepStatus::Pending->value);
+			$step->setSkipReason(null);
+			$step->setStartedAt(null);
+			$step->setCompletedAt(null);
+			$step->setSkippedAt(null);
+			$step->setReopenedAt($now);
+			$returned[] = $this->runSteps->update($step);
+		}
+
+		if ($returned === []) {
+			throw new ConflictException('section_has_no_resolved_steps');
+		}
+
+		$this->activity->record($run->getId(), null, ActivityType::SectionReturned, [
+			'sectionId' => $section->getId(),
+			'sectionTitle' => $section->getTitle(),
+			'reason' => $reason,
+			'count' => count($returned),
+		], $this->currentUserId());
+
+		return $returned;
 	}
 
 	public function completeRun(int $id): Run {
@@ -459,12 +585,41 @@ class RunService {
 	}
 
 	/**
+	 * Permanently delete a run and every related record.
+	 *
+	 * The run owner or a Nextcloud administrator may delete a run in any state.
+	 * Evidence files are removed from AppData before the run row is deleted so
+	 * no orphaned files remain; sections, steps, ACL, activity, comments,
+	 * mentions and notification ledger rows cascade with the run.
+	 */
+	public function deleteRun(int $id): void {
+		try {
+			$run = $this->runs->find($id);
+		} catch (DoesNotExistException) {
+			throw new NotFoundException('run_not_found');
+		}
+
+		$uid = $this->currentUserId();
+		if (!$this->access->isOwner($run, $uid) && !$this->groupManager->isAdmin($uid)) {
+			throw new NotFoundException('run_not_found');
+		}
+
+		foreach ($this->attachments->findByRun($id) as $attachment) {
+			$this->evidenceStorage->delete($id, $attachment->getStepId(), $attachment->getStorageKey());
+		}
+
+		$this->runs->delete($run);
+	}
+
+	/**
 	 * Progress is always calculated from the current steps.
 	 *
 	 * @param list<RunStep> $steps
+	 * @param list<int> $inapplicableStepIds Steps in sections whose condition is false.
 	 * @return array{total: int, completed: int, skipped: int, pending: int, percentage: int, canComplete: bool}
 	 */
-	public function calculateProgress(Run $run, array $steps): array {
+	public function calculateProgress(Run $run, array $steps, array $inapplicableStepIds = []): array {
+		$inapplicable = array_flip($inapplicableStepIds);
 		$total = count($steps);
 		$completed = 0;
 		$skipped = 0;
@@ -472,6 +627,13 @@ class RunService {
 		$unresolvedRequired = 0;
 
 		foreach ($steps as $step) {
+			// Steps of an inapplicable section are resolved (not actionable) and
+			// must never block completion.
+			if (isset($inapplicable[$step->getId()])) {
+				$skipped++;
+				continue;
+			}
+
 			$status = RunStepStatus::tryFrom($step->getStatus());
 			if ($status === RunStepStatus::Completed) {
 				$completed++;

@@ -25,6 +25,7 @@ import RunStepCard from '../components/RunStepCard.vue'
 import { getFeatures } from '../services/adminSettings.ts'
 import * as api from '../services/runs.ts'
 import { apiErrorMessage } from '../utils/apiError.ts'
+import { inapplicableReasonText, sectionStateLabel, STATUS_REASON_SEPARATOR } from '../utils/sectionReason.ts'
 
 const props = defineProps<{
 	runId: number
@@ -44,6 +45,7 @@ const loading = ref(false)
 const busy = ref(false)
 const error = ref<string | null>(null)
 const showCancel = ref(false)
+const showDelete = ref(false)
 
 const runActive = computed<boolean>(() => detail.value?.run.status === 'ACTIVE')
 const steps = computed(() => detail.value?.sections.flatMap((entry) => entry.steps) ?? [])
@@ -63,6 +65,8 @@ const requireSkipReason = computed<boolean>(() => features.value?.requireSkipRea
 const sectionOverrides = ref<Record<number, boolean>>({})
 const editingNotesId = ref<number | null>(null)
 const notesDraft = ref('')
+const sectionReturnId = ref<number | null>(null)
+const sectionReturnReason = ref('')
 
 /**
  * Whether every step of a section is resolved (completed or skipped).
@@ -105,6 +109,53 @@ function expandSectionForStep(stepId: number): void {
 	if (entry !== undefined && isCollapsed(entry)) {
 		sectionOverrides.value = { ...sectionOverrides.value, [entry.section.id]: false }
 	}
+}
+
+/**
+ * Whether a section can be returned to execution for correction.
+ *
+ * @param entry Section with its steps.
+ */
+function canReturnSection(entry: RunSectionWithSteps): boolean {
+	return runActive.value
+		&& detail.value?.permissions.canManage === true
+		&& entry.state === 'resolved'
+		&& entry.steps.length > 0
+}
+
+/**
+ * Start returning a section to execution.
+ *
+ * @param sectionId Run section identifier.
+ */
+function startSectionReturn(sectionId: number): void {
+	sectionReturnId.value = sectionId
+	sectionReturnReason.value = ''
+}
+
+/**
+ * Confirm the section return with the entered reason.
+ *
+ * @param sectionId Run section identifier.
+ */
+function submitSectionReturn(sectionId: number): void {
+	const reason = sectionReturnReason.value.trim()
+	if (reason === '') {
+		return
+	}
+	sectionReturnId.value = null
+	sectionReturnReason.value = ''
+	void mutate(() => api.returnRunSection(sectionId, reason))
+}
+
+/**
+ * Return a single step to execution for correction.
+ *
+ * @param stepId Run step identifier.
+ * @param reason Mandatory return reason.
+ */
+function returnStep(stepId: number, reason: string): void {
+	void mutate(() => api.returnStep(stepId, reason))
 }
 
 /**
@@ -322,6 +373,25 @@ function reopenRun(): void {
 }
 
 /**
+ * Confirm and permanently delete the run, then close the view.
+ */
+function confirmDeleteRun(): void {
+	showDelete.value = false
+	void (async () => {
+		busy.value = true
+		error.value = null
+		try {
+			await api.deleteRun(props.runId)
+			emit('close')
+		} catch (caught) {
+			error.value = apiErrorMessage(caught)
+		} finally {
+			busy.value = false
+		}
+	})()
+}
+
+/**
  * Format a Unix timestamp for display.
  *
  * @param timestamp Unix timestamp in seconds.
@@ -405,6 +475,13 @@ function formatDate(timestamp: number): string {
 				<NcButton v-if="detail.permissions.canReopen && runReopenEnabled" :disabled="busy" @click="reopenRun">
 					{{ t('runbook', 'Reopen run') }}
 				</NcButton>
+				<NcButton
+					v-if="detail.permissions.canDelete"
+					variant="error"
+					:disabled="busy"
+					@click="showDelete = true">
+					{{ t('runbook', 'Delete run') }}
+				</NcButton>
 			</div>
 
 			<RunAclEditor
@@ -426,6 +503,25 @@ function formatDate(timestamp: number): string {
 							{{ isCollapsed(entry) ? t('runbook', 'Expand') : t('runbook', 'Collapse') }}
 						</NcButton>
 					</div>
+
+					<div
+						v-if="entry.state === 'blocked' || entry.state === 'inapplicable' || entry.state === 'active'"
+						class="runbook-run__section-flow">
+						<span class="runbook-run__section-state">{{ sectionStateLabel(t, entry.state) }}</span>
+						<template v-if="entry.blockedBy.length > 0">
+							<span class="runbook-run__section-separator">{{ STATUS_REASON_SEPARATOR }}</span>
+							<span class="runbook-run__section-blocked">
+								{{ t('runbook', 'Waiting for: {sections}', { sections: entry.blockedBy.join(', ') }, { escape: false, sanitize: false }) }}
+							</span>
+						</template>
+						<template v-if="entry.state === 'inapplicable' && inapplicableReasonText(t, entry) !== ''">
+							<span class="runbook-run__section-separator">{{ STATUS_REASON_SEPARATOR }}</span>
+							<span class="runbook-run__section-blocked">
+								{{ t('runbook', 'Reason:') }} {{ inapplicableReasonText(t, entry) }}
+							</span>
+						</template>
+					</div>
+
 					<p v-if="entry.section.description" class="runbook-run__description">
 						{{ entry.section.description }}
 					</p>
@@ -455,6 +551,26 @@ function formatDate(timestamp: number): string {
 						</div>
 					</div>
 
+					<div v-if="canReturnSection(entry)" class="runbook-run__section-return">
+						<NcButton v-if="sectionReturnId !== entry.section.id" @click="startSectionReturn(entry.section.id)">
+							{{ t('runbook', 'Reopen section') }}
+						</NcButton>
+						<template v-else>
+							<NcTextArea v-model="sectionReturnReason" :label="t('runbook', 'Return reason')" />
+							<div class="runbook-run__notes-actions">
+								<NcButton
+									:disabled="busy || sectionReturnReason.trim() === ''"
+									variant="primary"
+									@click="submitSectionReturn(entry.section.id)">
+									{{ t('runbook', 'Confirm return') }}
+								</NcButton>
+								<NcButton @click="sectionReturnId = null">
+									{{ t('runbook', 'Cancel') }}
+								</NcButton>
+							</div>
+						</template>
+					</div>
+
 					<div v-show="!isCollapsed(entry)">
 						<div
 							v-for="step in entry.steps"
@@ -479,6 +595,7 @@ function formatDate(timestamp: number): string {
 								@complete="(response) => completeStep(step.id, response)"
 								@skip="(reason) => skipStep(step.id, reason)"
 								@reopen="reopenStep(step.id)"
+								@return="(reason) => returnStep(step.id, reason)"
 								@assign="(payload) => assignStep(step.id, payload)"
 								@uploadEvidence="(file) => uploadEvidence(step.id, file)"
 								@deleteEvidence="deleteEvidence" />
@@ -520,6 +637,15 @@ function formatDate(timestamp: number): string {
 			:busy="busy"
 			@confirm="confirmCancel"
 			@cancel="showCancel = false" />
+
+		<ConfirmDialog
+			v-if="showDelete"
+			:name="t('runbook', 'Delete run')"
+			:message="t('runbook', 'This permanently deletes the run, its activity, comments and evidence. This cannot be undone.')"
+			:confirmLabel="t('runbook', 'Delete run')"
+			:busy="busy"
+			@confirm="confirmDeleteRun"
+			@cancel="showDelete = false" />
 	</section>
 </template>
 
@@ -608,6 +734,32 @@ function formatDate(timestamp: number): string {
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
+}
+
+.runbook-run__section-flow {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+	margin: 4px 0;
+	font-size: 0.85em;
+}
+
+.runbook-run__section-state {
+	font-weight: bold;
+	color: var(--color-text-maxcontrast, #555);
+}
+
+.runbook-run__section-separator {
+	color: var(--color-text-maxcontrast, #555);
+}
+
+.runbook-run__section-blocked {
+	color: var(--color-warning-element, #bf7900);
+}
+
+.runbook-run__section-return {
+	margin: 8px 0;
 }
 
 .runbook-run__section-notes {

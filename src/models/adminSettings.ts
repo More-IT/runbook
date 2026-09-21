@@ -39,4 +39,6 @@ export interface AppFeatures {
 	runReopenEnabled: boolean
 	maxAttachmentSize: number
 	canCreateTemplates: boolean
+	uid: string
+	isAdmin: boolean
 }

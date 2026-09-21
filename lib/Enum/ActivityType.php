@@ -24,6 +24,8 @@ enum ActivityType: string {
 	case StepCompleted = 'step_completed';
 	case StepSkipped = 'step_skipped';
 	case StepReopened = 'step_reopened';
+	case StepReturned = 'step_returned';
+	case SectionReturned = 'section_returned';
 	case CommentAdded = 'comment_added';
 	case CommentEdited = 'comment_edited';
 	case CommentDeleted = 'comment_deleted';

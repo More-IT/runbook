@@ -6,6 +6,7 @@ namespace OCA\Runbook\Tests\Unit\Service;
 
 use OCA\Runbook\Db\ActivityEvent;
 use OCA\Runbook\Db\Run;
+use OCA\Runbook\Db\RunSection;
 use OCA\Runbook\Db\RunStep;
 use OCA\Runbook\Enum\AclRole;
 use OCA\Runbook\Enum\ActivityType;
@@ -574,5 +575,234 @@ class RunServiceTest extends RunTestBase {
 		$this->addRunStep($section->getId(), 'TEXT', false, RunStepStatus::Pending->value, 0, [], PrincipalType::User->value, 'bob');
 
 		self::assertSame($run->getId(), $this->runServiceFor('bob')->getRun($run->getId())->getId());
+	}
+
+	public function testOwnerCanDeleteActiveRun(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+
+		$this->runServiceFor('alice')->deleteRun($run->getId());
+
+		self::assertArrayNotHasKey($run->getId(), $this->runs);
+	}
+
+	public function testOwnerCanDeleteCompletedRun(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice', RunStatus::Completed->value);
+
+		$this->runServiceFor('alice')->deleteRun($run->getId());
+
+		self::assertArrayNotHasKey($run->getId(), $this->runs);
+	}
+
+	public function testOwnerCanDeleteCancelledRun(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice', RunStatus::Cancelled->value);
+
+		$this->runServiceFor('alice')->deleteRun($run->getId());
+
+		self::assertArrayNotHasKey($run->getId(), $this->runs);
+	}
+
+	public function testParticipantCannotDeleteRun(): void {
+		$this->addUser('alice');
+		$this->addUser('bob');
+		$run = $this->addRun('alice');
+		$this->seedRunAcl($run->getId(), PrincipalType::User->value, 'bob', RunAclRole::Participant->value);
+
+		$this->expectException(NotFoundException::class);
+		$this->runServiceFor('bob')->deleteRun($run->getId());
+	}
+
+	public function testAdminCanDeleteAnyRun(): void {
+		$this->addUser('alice');
+		$this->addUser('admin');
+		$this->adminUsers[] = 'admin';
+		$run = $this->addRun('alice');
+
+		$this->runServiceFor('admin')->deleteRun($run->getId());
+
+		self::assertArrayNotHasKey($run->getId(), $this->runs);
+	}
+
+	public function testDeleteRunRemovesEvidenceFiles(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$step = $this->addRunStep($section->getId(), 'FILE', false, RunStepStatus::Pending->value, 0);
+		$this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'evidence.txt', 'content' => 'evidence']);
+
+		self::assertNotSame([], $this->evidenceFiles);
+
+		$this->runServiceFor('alice')->deleteRun($run->getId());
+
+		self::assertSame([], $this->evidenceFiles);
+	}
+
+	public function testNonOwnerCannotDeleteMissingRun(): void {
+		$this->addUser('alice');
+		$this->addUser('bob');
+
+		$this->expectException(NotFoundException::class);
+		$this->runServiceFor('bob')->deleteRun(999999);
+	}
+
+	public function testStartRunSnapshotMapsFlowConfiguration(): void {
+		$this->addUser('alice');
+		$template = $this->addTemplate('alice');
+		$first = $this->addTemplateSection($template->getId(), 'A', 0);
+		$second = $this->addTemplateSection($template->getId(), 'B', 1);
+		$second->setDependsOnIds([$first->getId()]);
+		$control = $this->addTemplateStep($first->getId(), 'Approved?', 'CONFIRMATION', true, 0);
+		$second->setCondition(['stepId' => $control->getId(), 'operator' => 'is_true']);
+
+		$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Run']);
+
+		$runSections = array_values($this->runSections);
+		usort($runSections, static fn (RunSection $a, RunSection $b): int => $a->getPosition() <=> $b->getPosition());
+		self::assertSame([$runSections[0]->getId()], $runSections[1]->getDependsOnIds());
+
+		$runControl = null;
+		foreach ($this->runSteps as $runStep) {
+			if ($runStep->getSourceStepId() === $control->getId()) {
+				$runControl = $runStep;
+			}
+		}
+		self::assertNotNull($runControl);
+		$condition = $runSections[1]->getCondition();
+		self::assertNotNull($condition);
+		self::assertSame($runControl->getId(), $condition['stepId']);
+	}
+
+	public function testStartRunSnapshotMapsEveryCondition(): void {
+		$this->addUser('alice');
+		$template = $this->addTemplate('alice');
+		$first = $this->addTemplateSection($template->getId(), 'A', 0);
+		$control = $this->addTemplateStep($first->getId(), 'Approved?', 'CONFIRMATION', true, 0);
+		$amount = $this->addTemplateStep($first->getId(), 'Amount', 'NUMBER', true, 1);
+		$second = $this->addTemplateSection($template->getId(), 'B', 1);
+		$second->setConditions([
+			['stepId' => $control->getId(), 'operator' => 'is_true'],
+			['stepId' => $amount->getId(), 'operator' => 'greater_than', 'value' => 5.0],
+		]);
+
+		$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Run']);
+
+		$runSections = array_values($this->runSections);
+		usort($runSections, static fn (RunSection $a, RunSection $b): int => $a->getPosition() <=> $b->getPosition());
+		$runStepsBySource = [];
+		foreach ($this->runSteps as $runStep) {
+			$runStepsBySource[$runStep->getSourceStepId()] = $runStep;
+		}
+
+		$conditions = $runSections[1]->getConditions();
+		self::assertCount(2, $conditions);
+		self::assertSame($runStepsBySource[$control->getId()]->getId(), $conditions[0]['stepId']);
+		self::assertSame($runStepsBySource[$amount->getId()]->getId(), $conditions[1]['stepId']);
+		self::assertSame('greater_than', $conditions[1]['operator']);
+		self::assertEquals(5.0, $conditions[1]['value']);
+	}
+
+	public function testBlockedSectionStateAndExecutableIds(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$a = $this->addRunSection($run->getId(), 0);
+		$b = $this->addRunSection($run->getId(), 1);
+		$b->setDependsOnIds([$a->getId()]);
+		$aStep = $this->addRunStep($a->getId(), 'TEXT', true, RunStepStatus::Pending->value, 0);
+		$bStep = $this->addRunStep($b->getId(), 'TEXT', true, RunStepStatus::Pending->value, 1);
+
+		$detail = $this->runServiceFor('alice')->getRunDetail($run->getId());
+
+		self::assertSame('available', $detail['sections'][0]['state']);
+		self::assertSame('blocked', $detail['sections'][1]['state']);
+		self::assertNotSame([], $detail['sections'][1]['blockedBy']);
+		self::assertContains($aStep->getId(), $detail['permissions']['executableStepIds']);
+		self::assertNotContains($bStep->getId(), $detail['permissions']['executableStepIds']);
+	}
+
+	public function testBlockedSectionStepCannotBeStarted(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$a = $this->addRunSection($run->getId(), 0);
+		$b = $this->addRunSection($run->getId(), 1);
+		$b->setDependsOnIds([$a->getId()]);
+		$this->addRunStep($a->getId(), 'TEXT', true, RunStepStatus::Pending->value, 0);
+		$bStep = $this->addRunStep($b->getId(), 'TEXT', true, RunStepStatus::Pending->value, 1);
+
+		$this->expectException(ConflictException::class);
+		$this->runStepServiceFor('alice')->start($bStep->getId());
+	}
+
+	public function testInapplicableSectionDoesNotBlockCompletion(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$start = $this->addRunSection($run->getId(), 0);
+		$control = $this->addRunStep($start->getId(), 'CONFIRMATION', true, RunStepStatus::Completed->value, 0);
+		$control->setResponseValue(false);
+		$branch = $this->addRunSection($run->getId(), 1);
+		$branch->setCondition(['stepId' => $control->getId(), 'operator' => 'is_true']);
+		$this->addRunStep($branch->getId(), 'TEXT', true, RunStepStatus::Pending->value, 1);
+
+		$detail = $this->runServiceFor('alice')->getRunDetail($run->getId());
+
+		self::assertSame('inapplicable', $detail['sections'][1]['state']);
+		self::assertSame(0, $detail['progress']['pending']);
+		self::assertTrue($detail['progress']['canComplete']);
+	}
+
+	public function testReturnSectionReopensStepsAndPreservesResponses(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$step = $this->addRunStep($section->getId(), 'TEXT', true, RunStepStatus::Completed->value, 0);
+		$step->setResponseValue('answer');
+
+		$returned = $this->runServiceFor('alice')->returnSection($section->getId(), ['reason' => 'Fix typo']);
+
+		self::assertCount(1, $returned);
+		self::assertSame(RunStepStatus::Pending->value, $returned[0]->getStatus());
+		self::assertSame('answer', $returned[0]->getResponseValue());
+	}
+
+	public function testReturnSectionRequiresReason(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$this->addRunStep($section->getId(), 'TEXT', true, RunStepStatus::Completed->value, 0);
+
+		$this->expectException(ValidationException::class);
+		$this->runServiceFor('alice')->returnSection($section->getId(), ['reason' => '  ']);
+	}
+
+	public function testReturnedResolvedSectionBecomesAvailableAgain(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$step = $this->addRunStep($section->getId(), 'TEXT', true, RunStepStatus::Completed->value, 0);
+		$step->setResponseValue('answer');
+
+		$before = $this->runServiceFor('alice')->getRunDetail($run->getId());
+		self::assertSame('resolved', $before['sections'][0]['state']);
+
+		$this->runServiceFor('alice')->returnSection($section->getId(), ['reason' => 'Fix typo']);
+
+		$after = $this->runServiceFor('alice')->getRunDetail($run->getId());
+		self::assertSame('available', $after['sections'][0]['state']);
+		self::assertSame([], $after['sections'][0]['reason']);
+		self::assertFalse($after['progress']['canComplete']);
+	}
+
+	public function testReturnSectionRequiresOwnership(): void {
+		$this->addUser('alice');
+		$this->addUser('bob');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$this->addRunStep($section->getId(), 'TEXT', true, RunStepStatus::Completed->value, 0);
+
+		// A non-owner is denied; the run is hidden behind a not-found error so
+		// the API never leaks another user's run.
+		$this->expectException(NotFoundException::class);
+		$this->runServiceFor('bob')->returnSection($section->getId(), ['reason' => 'nope']);
 	}
 }

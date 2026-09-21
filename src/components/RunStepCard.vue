@@ -36,6 +36,7 @@ const emit = defineEmits<{
 	complete: [response: StepResponse]
 	skip: [reason: string]
 	reopen: []
+	return: [reason: string]
 	assign: [payload: StepAssignmentPayload]
 	uploadEvidence: [file: File]
 	deleteEvidence: [id: number]
@@ -51,6 +52,8 @@ const userOptions = ref<Principal[]>([])
 const userLoading = ref(false)
 const skipOpen = ref(false)
 const skipReason = ref('')
+const returnOpen = ref(false)
+const returnReason = ref('')
 const evidenceFile = ref<File | null>(null)
 
 const assignOpen = ref(false)
@@ -210,6 +213,8 @@ function reset(): void {
 		: null
 	skipOpen.value = false
 	skipReason.value = ''
+	returnOpen.value = false
+	returnReason.value = ''
 	assignOpen.value = false
 	assigneeValue.value = props.step.assigneeType !== null && props.step.assigneeId !== null
 		? { principalType: props.step.assigneeType, principalId: props.step.assigneeId, displayName: props.step.assigneeId }
@@ -341,6 +346,17 @@ function confirmSkip(): void {
 }
 
 /**
+ * Emit a request to return the step to execution for correction.
+ */
+function confirmReturn(): void {
+	if (returnReason.value.trim() === '') {
+		return
+	}
+	emit('return', returnReason.value.trim())
+	returnOpen.value = false
+}
+
+/**
  *
  */
 function submitAssignment(): void {
@@ -464,6 +480,21 @@ function submitAssignment(): void {
 			<NcButton @click="emit('reopen')">
 				{{ t('runbook', 'Reopen step') }}
 			</NcButton>
+			<NcButton @click="returnOpen = !returnOpen">
+				{{ t('runbook', 'Return for correction') }}
+			</NcButton>
+		</div>
+
+		<div v-if="canExecute && runActive && !isEditable && canReopen && returnOpen" class="runbook-run-step__skip">
+			<NcTextArea v-model="returnReason" :label="t('runbook', 'Return reason')" />
+			<div class="runbook-run-step__skip-actions">
+				<NcButton :disabled="returnReason.trim() === ''" variant="primary" @click="confirmReturn">
+					{{ t('runbook', 'Confirm return') }}
+				</NcButton>
+				<NcButton @click="returnOpen = false">
+					{{ t('runbook', 'Cancel') }}
+				</NcButton>
+			</div>
 		</div>
 
 		<div v-if="canManageAssignments && runActive" class="runbook-run-step__assign">

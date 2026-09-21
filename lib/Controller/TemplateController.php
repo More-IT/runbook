@@ -117,4 +117,24 @@ class TemplateController extends ApiController {
 
 		return new JSONResponse(['template' => $template->toArray()]);
 	}
+
+	/**
+	 * @return JSONResponse<Http::STATUS_OK, array{template: TemplateData}, array{}>
+	 */
+	#[NoAdminRequired]
+	public function unarchive(): JSONResponse {
+		$template = $this->templateService->unarchiveTemplate($this->requireId('id'));
+
+		return new JSONResponse(['template' => $template->toArray()]);
+	}
+
+	/**
+	 * @return JSONResponse<Http::STATUS_CREATED, array{template: TemplateData}, array{}>
+	 */
+	#[NoAdminRequired]
+	public function duplicate(): JSONResponse {
+		$template = $this->templateService->duplicateTemplate($this->requireId('id'));
+
+		return new JSONResponse(['template' => $template->toArray()], Http::STATUS_CREATED);
+	}
 }

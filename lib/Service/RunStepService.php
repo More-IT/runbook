@@ -40,6 +40,7 @@ class RunStepService {
 		private readonly AdminSettings $settings,
 		private readonly IUserSession $userSession,
 		private readonly ITimeFactory $timeFactory,
+		private readonly FlowService $flow,
 	) {
 	}
 
@@ -207,6 +208,51 @@ class RunStepService {
 	}
 
 	/**
+	 * Return a completed or skipped step to execution for correction.
+	 *
+	 * Unlike a plain reopen, a return requires a reason and keeps the previous
+	 * response, attached evidence and activity history intact.
+	 *
+	 * @param array<string, mixed> $data
+	 */
+	public function returnStep(int $stepId, array $data): RunStep {
+		[$run, $step] = $this->requireStepForExecution($stepId);
+
+		$status = RunStepStatus::tryFrom($step->getStatus());
+		if ($status !== RunStepStatus::Completed && $status !== RunStepStatus::Skipped) {
+			throw new ConflictException('invalid_step_transition');
+		}
+
+		$reason = trim($this->readString($data, 'reason') ?? '');
+		if ($reason === '') {
+			throw new ValidationException('return_reason_required');
+		}
+		if (mb_strlen($reason) > self::MAX_SKIP_REASON_LENGTH) {
+			throw new ValidationException('return_reason_too_long');
+		}
+
+		$previousStatus = $step->getStatus();
+		$now = $this->timeFactory->getTime();
+		$step->setStatus(RunStepStatus::Pending->value);
+		// The stored response is preserved on purpose; only the skip reason is
+		// cleared because the step is no longer skipped.
+		$step->setSkipReason(null);
+		$step->setStartedAt(null);
+		$step->setCompletedAt(null);
+		$step->setSkippedAt(null);
+		$step->setReopenedAt($now);
+		$step = $this->runSteps->update($step);
+		$this->touchRun($run);
+		$this->activity->record($run->getId(), $step->getId(), ActivityType::StepReturned, [
+			'reason' => $reason,
+			'previous' => $previousStatus,
+			'new' => RunStepStatus::Pending->value,
+		], $this->currentUserId());
+
+		return $step;
+	}
+
+	/**
 	 * @param array<string, mixed> $data
 	 */
 	private function applyAssignment(Run $run, RunStep $step, array $data): void {
@@ -291,7 +337,23 @@ class RunStepService {
 			throw new ForbiddenException('not_allowed');
 		}
 
+		$this->assertSectionAvailable($run, $step);
+
 		return [$run, $step];
+	}
+
+	/**
+	 * Reject execution of steps whose section is blocked or inapplicable.
+	 */
+	private function assertSectionAvailable(Run $run, RunStep $step): void {
+		$flow = $this->flow->evaluate(
+			$this->runSections->findByRun($run->getId()),
+			$this->runSteps->findByRun($run->getId()),
+		);
+		$state = $flow['states'][$step->getRunSectionId()] ?? FlowService::STATE_AVAILABLE;
+		if ($state === FlowService::STATE_BLOCKED || $state === FlowService::STATE_INAPPLICABLE) {
+			throw new ConflictException('section_not_available');
+		}
 	}
 
 	/**

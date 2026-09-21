@@ -10,6 +10,7 @@ use OCA\Runbook\Service\TemplateCreationPolicyService;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\JSONResponse;
+use OCP\IGroupManager;
 use OCP\IRequest;
 use OCP\IUserSession;
 
@@ -28,6 +29,7 @@ class AdminSettingsController extends ApiController {
 		private readonly AdminSettings $settings,
 		private readonly TemplateCreationPolicyService $creationPolicy,
 		private readonly IUserSession $userSession,
+		private readonly IGroupManager $groupManager,
 	) {
 		parent::__construct($appName, $request);
 	}
@@ -62,6 +64,8 @@ class AdminSettingsController extends ApiController {
 	 */
 	#[NoAdminRequired]
 	public function features(): JSONResponse {
+		$uid = $this->currentUserId();
+
 		return new JSONResponse([
 			'features' => [
 				'commentsEnabled' => $this->settings->isCommentsEnabled(),
@@ -69,7 +73,9 @@ class AdminSettingsController extends ApiController {
 				'requireSkipReason' => $this->settings->isSkipReasonRequired(),
 				'runReopenEnabled' => $this->settings->isRunReopenEnabled(),
 				'maxAttachmentSize' => $this->settings->getMaxAttachmentSize(),
-				'canCreateTemplates' => $this->creationPolicy->canCreate($this->currentUserId()),
+				'canCreateTemplates' => $this->creationPolicy->canCreate($uid),
+				'uid' => $uid,
+				'isAdmin' => $this->groupManager->isAdmin($uid),
 			],
 		]);
 	}

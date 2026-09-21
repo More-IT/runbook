@@ -39,6 +39,7 @@ class WorkService {
 		private readonly IUserSession $userSession,
 		private readonly ITimeFactory $timeFactory,
 		private readonly IConfig $config,
+		private readonly FlowService $flow,
 	) {
 	}
 
@@ -65,9 +66,17 @@ class WorkService {
 		[$todayStart, $todayEnd] = $this->dayRange($uid, $now);
 
 		$items = [];
+		$unavailableCache = [];
 		foreach ($this->assignedItems($uid) as $item) {
 			$run = $item['run'];
 			$step = $item['step'];
+
+			// Steps in blocked or inapplicable sections are not actionable work.
+			$unavailable = $this->unavailableStepIds($run->getId(), $unavailableCache);
+			if (isset($unavailable[$step->getId()])) {
+				continue;
+			}
+
 			$status = RunStepStatus::tryFrom($step->getStatus());
 			$active = $run->getStatus() === RunStatus::Active->value
 				&& ($status === RunStepStatus::Pending || $status === RunStepStatus::InProgress);
@@ -139,17 +148,47 @@ class WorkService {
 		$monthStart = $this->monthStart($uid, $now);
 
 		$assignedWork = $this->myWorkForUser($uid, 'all');
+		$overdue = 0;
+		foreach ($assignedWork as $item) {
+			if ($item['overdue']) {
+				$overdue++;
+			}
+		}
 		$recentRuns = $this->runs->findAccessible($uid, $runIds, self::OVERVIEW_RUN_LIMIT);
 
 		return [
 			'activeRuns' => $this->runs->countAccessible($uid, $runIds, RunStatus::Active->value),
-			'assignedActiveSteps' => $this->runSteps->countAssignedActive($uid, $groupIds),
-			'overdue' => $this->runSteps->countAssignedOverdue($uid, $groupIds, $now),
+			'assignedActiveSteps' => count($assignedWork),
+			'overdue' => $overdue,
 			'completedStepsThisMonth' => $this->runSteps->countAssignedCompletedSince($uid, $groupIds, $monthStart),
 			'completedRunsThisMonth' => $this->runs->countAccessibleCompletedSince($uid, $runIds, $monthStart),
 			'assignedWork' => array_slice($assignedWork, 0, self::OVERVIEW_WORK_LIMIT),
 			'recentRuns' => $recentRuns,
 		];
+	}
+
+	/**
+	 * Step ids of a run that live in blocked or inapplicable sections.
+	 *
+	 * @param array<int, array<int, true>> $cache
+	 * @return array<int, true>
+	 */
+	private function unavailableStepIds(int $runId, array &$cache): array {
+		if (isset($cache[$runId])) {
+			return $cache[$runId];
+		}
+
+		$flow = $this->flow->evaluate(
+			$this->runSections->findByRun($runId),
+			$this->runSteps->findByRun($runId),
+		);
+
+		$unavailable = [];
+		foreach (array_merge($flow['blockedStepIds'], $flow['inapplicableStepIds']) as $stepId) {
+			$unavailable[$stepId] = true;
+		}
+
+		return $cache[$runId] = $unavailable;
 	}
 
 	/**

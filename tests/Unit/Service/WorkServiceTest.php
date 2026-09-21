@@ -140,4 +140,20 @@ class WorkServiceTest extends RunTestBase {
 		self::assertCount(1, $overview['assignedWork']);
 		self::assertCount(1, $overview['recentRuns']);
 	}
+
+	public function testBlockedStepIsNotActionableWork(): void {
+		$this->addUser('alice');
+		$this->addUser('bob');
+		$run = $this->addRun('alice');
+		$a = $this->addRunSection($run->getId(), 0);
+		$b = $this->addRunSection($run->getId(), 1);
+		$b->setDependsOnIds([$a->getId()]);
+		$this->addRunStep($a->getId(), 'CHECK', true, RunStepStatus::Pending->value, 0, [], PrincipalType::User->value, 'bob');
+		$this->addRunStep($b->getId(), 'CHECK', true, RunStepStatus::Pending->value, 1, [], PrincipalType::User->value, 'bob');
+
+		$all = $this->workServiceFor('bob')->myWork('all');
+
+		self::assertCount(1, $all);
+		self::assertSame($a->getId(), $all[0]['step']->getRunSectionId());
+	}
 }

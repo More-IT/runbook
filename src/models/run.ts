@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import type { PrincipalType, StepConfig, StepType } from './template.ts'
+import type { PrincipalType, StepCondition, StepConfig, StepType } from './template.ts'
 
 export type RunStatus = 'ACTIVE' | 'COMPLETED' | 'CANCELLED'
 
@@ -49,6 +49,9 @@ export interface RunSection {
 	description: string
 	notes: string
 	position: number
+	dependsOn: number[]
+	condition: StepCondition | null
+	conditions: StepCondition[]
 }
 
 export interface RunStep {
@@ -92,6 +95,7 @@ export interface RunPermissions {
 	canReopen: boolean
 	canManageAssignments: boolean
 	canComment: boolean
+	canDelete: boolean
 	executableStepIds: number[]
 }
 
@@ -149,6 +153,8 @@ export type ActivityType
 		| 'step_completed'
 		| 'step_skipped'
 		| 'step_reopened'
+		| 'step_returned'
+		| 'section_returned'
 		| 'comment_added'
 		| 'comment_edited'
 		| 'comment_deleted'
@@ -165,9 +171,23 @@ export interface RunActivityEvent {
 	createdAt: number
 }
 
+export type SectionReasonType = 'condition_false' | 'condition_pending' | 'dependency'
+
+export interface SectionReason {
+	type: SectionReasonType
+	title: string
+	stepId?: number
+	sectionId?: number
+	operator?: string
+	expected?: string | number | boolean
+}
+
 export interface RunSectionWithSteps {
 	section: RunSection
 	steps: RunStep[]
+	state: string
+	blockedBy: string[]
+	reason: SectionReason[]
 }
 
 export interface RunDetail {

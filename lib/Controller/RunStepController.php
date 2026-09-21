@@ -77,4 +77,14 @@ class RunStepController extends ApiController {
 
 		return new JSONResponse(['step' => $step->toArray()]);
 	}
+
+	/**
+	 * @return JSONResponse<Http::STATUS_OK, array{step: RunStepData}, array{}>
+	 */
+	#[NoAdminRequired]
+	public function returnStep(): JSONResponse {
+		$step = $this->runStepService->returnStep($this->requireId('id'), $this->body(['reason']));
+
+		return new JSONResponse(['step' => $step->toArray()]);
+	}
 }

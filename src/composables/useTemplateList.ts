@@ -9,7 +9,9 @@ import { ref } from 'vue'
 import {
 	createTemplate as createTemplateRequest,
 	deleteTemplate as deleteTemplateRequest,
+	duplicateTemplate as duplicateTemplateRequest,
 	listTemplates,
+	unarchiveTemplate as unarchiveTemplateRequest,
 } from '../services/templates.ts'
 import { apiErrorMessage } from '../utils/apiError.ts'
 
@@ -74,6 +76,44 @@ export function useTemplateList() {
 		}
 	}
 
+	/**
+	 * Duplicate a template and prepend the copy to the list.
+	 *
+	 * @param id Template identifier.
+	 */
+	async function duplicate(id: number): Promise<Template | null> {
+		error.value = null
+		try {
+			const template = await duplicateTemplateRequest(id)
+			templates.value = [template, ...templates.value]
+
+			return template
+		} catch (caught) {
+			error.value = apiErrorMessage(caught)
+
+			return null
+		}
+	}
+
+	/**
+	 * Restore an archived template in the list.
+	 *
+	 * @param id Template identifier.
+	 */
+	async function unarchive(id: number): Promise<Template | null> {
+		error.value = null
+		try {
+			const template = await unarchiveTemplateRequest(id)
+			templates.value = templates.value.map((entry) => entry.id === id ? template : entry)
+
+			return template
+		} catch (caught) {
+			error.value = apiErrorMessage(caught)
+
+			return null
+		}
+	}
+
 	return {
 		templates,
 		loading,
@@ -81,5 +121,7 @@ export function useTemplateList() {
 		refresh,
 		create,
 		remove,
+		duplicate,
+		unarchive,
 	}
 }

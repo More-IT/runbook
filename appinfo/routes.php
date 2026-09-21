@@ -14,6 +14,8 @@ return [
 		['name' => 'template#destroy', 'url' => '/api/v1/templates/{id}', 'verb' => 'DELETE'],
 		['name' => 'template#publish', 'url' => '/api/v1/templates/{id}/publish', 'verb' => 'POST'],
 		['name' => 'template#archive', 'url' => '/api/v1/templates/{id}/archive', 'verb' => 'POST'],
+		['name' => 'template#unarchive', 'url' => '/api/v1/templates/{id}/unarchive', 'verb' => 'POST'],
+		['name' => 'template#duplicate', 'url' => '/api/v1/templates/{id}/duplicate', 'verb' => 'POST'],
 
 		['name' => 'section#create', 'url' => '/api/v1/templates/{templateId}/sections', 'verb' => 'POST'],
 		['name' => 'section#update', 'url' => '/api/v1/sections/{id}', 'verb' => 'PATCH'],
@@ -35,14 +37,17 @@ return [
 		['name' => 'run#complete', 'url' => '/api/v1/runs/{id}/complete', 'verb' => 'POST'],
 		['name' => 'run#cancel', 'url' => '/api/v1/runs/{id}/cancel', 'verb' => 'POST'],
 		['name' => 'run#reopen', 'url' => '/api/v1/runs/{id}/reopen', 'verb' => 'POST'],
+		['name' => 'run#destroy', 'url' => '/api/v1/runs/{id}', 'verb' => 'DELETE'],
 
 		['name' => 'run_step#start', 'url' => '/api/v1/run-steps/{id}/start', 'verb' => 'POST'],
 		['name' => 'run_step#update', 'url' => '/api/v1/run-steps/{id}', 'verb' => 'PATCH'],
 		['name' => 'run_step#complete', 'url' => '/api/v1/run-steps/{id}/complete', 'verb' => 'POST'],
 		['name' => 'run_step#skip', 'url' => '/api/v1/run-steps/{id}/skip', 'verb' => 'POST'],
 		['name' => 'run_step#reopen', 'url' => '/api/v1/run-steps/{id}/reopen', 'verb' => 'POST'],
+		['name' => 'run_step#returnStep', 'url' => '/api/v1/run-steps/{id}/return', 'verb' => 'POST'],
 
 		['name' => 'run_section#update', 'url' => '/api/v1/run-sections/{id}', 'verb' => 'PATCH'],
+		['name' => 'run_section#returnSection', 'url' => '/api/v1/run-sections/{id}/return', 'verb' => 'POST'],
 
 		['name' => 'run_acl#index', 'url' => '/api/v1/runs/{id}/acl', 'verb' => 'GET'],
 		['name' => 'run_acl#update', 'url' => '/api/v1/runs/{id}/acl', 'verb' => 'PUT'],

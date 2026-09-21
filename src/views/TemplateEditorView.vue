@@ -50,6 +50,26 @@ const showStartRun = ref(false)
 
 const template = computed<Template | null>(() => detail.value?.template ?? null)
 const sections = computed<SectionWithSteps[]>(() => detail.value?.sections ?? [])
+
+const conditionSteps = computed(() => sections.value.flatMap((entry) => entry.steps.map((step) => ({
+	id: step.id,
+	title: step.title,
+	type: step.type,
+	options: Array.isArray(step.config.options)
+		? step.config.options.filter((option): option is string => typeof option === 'string')
+		: [],
+}))))
+
+/**
+ * Other sections of the template that a section may depend on.
+ *
+ * @param sectionId Identifier of the section being edited.
+ */
+function siblingSections(sectionId: number): Array<{ id: number, title: string }> {
+	return sections.value
+		.filter((entry) => entry.section.id !== sectionId)
+		.map((entry) => ({ id: entry.section.id, title: entry.section.title }))
+}
 const permissions = computed<TemplatePermissions | null>(() => detail.value?.permissions ?? null)
 const isArchived = computed<boolean>(() => template.value?.status === 'ARCHIVED')
 const canEdit = computed<boolean>(() => permissions.value?.canEdit ?? false)
@@ -431,6 +451,8 @@ function moveStep(sectionId: number, stepId: number, direction: 'up' | 'down'): 
 					:key="entry.section.id"
 					:section="entry.section"
 					:steps="entry.steps"
+					:siblingSections="siblingSections(entry.section.id)"
+					:conditionSteps="conditionSteps"
 					:busy="busy"
 					:canMoveUp="index > 0"
 					:canMoveDown="index < sections.length - 1"

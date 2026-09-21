@@ -1,6 +1,6 @@
 {
   "name": "runbook",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Create, execute and track repeatable procedures as structured, collaborative runbooks.",
   "license": "AGPL-3.0-or-later",
   "private": true,
@@ -13,7 +13,8 @@
     "dev": "vite build --watch --mode development",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "test:frontend": "node --test tests/frontend/"
   },
   "dependencies": {
     "@nextcloud/axios": "^2.6.0",

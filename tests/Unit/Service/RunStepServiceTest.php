@@ -396,4 +396,43 @@ class RunStepServiceTest extends RunTestBase {
 		self::assertSame('bob', $stored->getAssigneeId());
 		self::assertSame(RunStatus::Completed->value, $this->runs[$run->getId()]->getStatus());
 	}
+
+	public function testReturnStepRequiresReason(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$step = $this->addRunStep($section->getId(), 'TEXT', true, RunStepStatus::Completed->value, 0);
+
+		$this->expectException(ValidationException::class);
+		$this->runStepServiceFor('alice')->returnStep($step->getId(), ['reason' => '   ']);
+	}
+
+	public function testReturnStepPreservesResponse(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$step = $this->addRunStep($section->getId(), 'TEXT', true, RunStepStatus::Completed->value, 0);
+		$step->setResponseValue('answer');
+
+		$returned = $this->runStepServiceFor('alice')->returnStep($step->getId(), ['reason' => 'Correction']);
+
+		self::assertSame(RunStepStatus::Pending->value, $returned->getStatus());
+		self::assertSame('answer', $returned->getResponseValue());
+	}
+
+	public function testReturnRecordsActivityWithReason(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$step = $this->addRunStep($section->getId(), 'TEXT', true, RunStepStatus::Completed->value, 0);
+
+		$this->runStepServiceFor('alice')->returnStep($step->getId(), ['reason' => 'Redo']);
+
+		$events = array_values(array_filter(
+			$this->activityEvents,
+			static fn (\OCA\Runbook\Db\ActivityEvent $event): bool => $event->getEventType() === \OCA\Runbook\Enum\ActivityType::StepReturned->value,
+		));
+		self::assertCount(1, $events);
+		self::assertSame('Redo', $events[0]->getMetadataArray()['reason']);
+	}
 }

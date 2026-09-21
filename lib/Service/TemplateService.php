@@ -15,6 +15,7 @@ use OCA\Runbook\Enum\StepType;
 use OCA\Runbook\Enum\TemplateStatus;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\IGroupManager;
 use OCP\IUserSession;
 use OCP\Security\ISecureRandom;
 
@@ -43,6 +44,7 @@ class TemplateService {
 		private readonly TemplateAclMapper $aclMapper,
 		private readonly PermissionService $permissionService,
 		private readonly TemplateCreationPolicyService $creationPolicy,
+		private readonly IGroupManager $groupManager,
 	) {
 	}
 
@@ -193,6 +195,83 @@ class TemplateService {
 	}
 
 	/**
+	 * Restore an archived template to the active listing.
+	 *
+	 * Only the owner or a Nextcloud administrator may unarchive. The template
+	 * returns to PUBLISHED when it had been published before, otherwise to
+	 * DRAFT, so publishing history and content are preserved.
+	 */
+	public function unarchiveTemplate(int $id): Template {
+		$template = $this->requireOwnerOrAdminTemplate($id);
+
+		if ($template->getStatus() !== TemplateStatus::Archived->value) {
+			throw new ConflictException('template_not_archived');
+		}
+
+		$now = $this->timeFactory->getTime();
+		$target = $template->getPublishedAt() !== null
+			? TemplateStatus::Published->value
+			: TemplateStatus::Draft->value;
+		$template->setStatus($target);
+		$template->setArchivedAt(null);
+		$template->setUpdatedAt($now);
+
+		return $this->templates->update($template);
+	}
+
+	/**
+	 * Duplicate a template into a new independent draft owned by the current
+	 * user.
+	 *
+	 * Only the template owner or a Nextcloud administrator may duplicate.
+	 * Sections, steps and their configuration are copied. Runs, activity,
+	 * comments, evidence and the source ACL are intentionally never copied.
+	 */
+	public function duplicateTemplate(int $id): Template {
+		$source = $this->requireOwnerOrAdminTemplate($id);
+
+		$uid = $this->currentUserId();
+		$now = $this->timeFactory->getTime();
+		$copy = new Template();
+		$copy->setUuid($this->generateUuid());
+		$copy->setTitle($this->copyTitle($source->getTitle()));
+		$copy->setDescription($source->getDescription());
+		$copy->setVersion(1);
+		$copy->setStatus(TemplateStatus::Draft->value);
+		$copy->setOwner($uid);
+		$copy->setCreatedAt($now);
+		$copy->setUpdatedAt($now);
+		$copy = $this->templates->insert($copy);
+
+		foreach ($this->sections->findByTemplate($source->getId()) as $sourceSection) {
+			$section = new TemplateSection();
+			$section->setTemplateId($copy->getId());
+			$section->setTitle($sourceSection->getTitle());
+			$section->setDescription($sourceSection->getDescription());
+			$section->setNotes($sourceSection->getNotes());
+			$section->setPosition($sourceSection->getPosition());
+			$section = $this->sections->insert($section);
+
+			foreach ($this->steps->findBySection($sourceSection->getId()) as $sourceStep) {
+				$step = new TemplateStep();
+				$step->setSectionId($section->getId());
+				$step->setUuid($this->generateUuid());
+				$step->setTitle($sourceStep->getTitle());
+				$step->setDescription($sourceStep->getDescription());
+				$step->setType($sourceStep->getType());
+				$step->setRequired($sourceStep->getRequired());
+				$step->setPosition($sourceStep->getPosition());
+				$step->setConfigArray($sourceStep->getConfigArray());
+				$step->setDefaultAssignee($sourceStep->getDefaultAssignee());
+				$step->setDueOffset($sourceStep->getDueOffset());
+				$this->steps->insert($step);
+			}
+		}
+
+		return $copy;
+	}
+
+	/**
 	 * @return list<TemplateSection>
 	 */
 	public function getSections(int $templateId): array {
@@ -212,12 +291,17 @@ class TemplateService {
 		$title = $this->normalizeTitle($this->requireString($data, 'title', 'section_title_required'));
 		$description = $this->normalizeDescription($this->readString($data, 'description') ?? '');
 		$notes = $this->normalizeNotes($this->readString($data, 'notes') ?? '');
+		$dependsOn = $this->normalizeDependsOn($data['dependsOn'] ?? null, $templateId, null);
+		$conditions = $this->normalizeConditions($data['conditions'] ?? $data['condition'] ?? null, $templateId, null);
+		$this->assertNoAmbiguousCondition($templateId, null, $conditions);
 
 		$section = new TemplateSection();
 		$section->setTemplateId($templateId);
 		$section->setTitle($title);
 		$section->setDescription($description);
 		$section->setNotes($notes);
+		$section->setDependsOnIds($dependsOn);
+		$section->setConditions($conditions);
 		$section->setPosition(count($this->sections->findByTemplate($templateId)));
 
 		$section = $this->sections->insert($section);
@@ -263,6 +347,25 @@ class TemplateService {
 			}
 		}
 
+		if (array_key_exists('dependsOn', $data)) {
+			$dependsOn = $this->normalizeDependsOn($data['dependsOn'], $section->getTemplateId(), $section->getId());
+			$this->assertNoDependencyCycles($section->getTemplateId(), [$section->getId() => $dependsOn]);
+			if ($dependsOn !== $section->getDependsOnIds()) {
+				$section->setDependsOnIds($dependsOn);
+				$changed = true;
+			}
+		}
+
+		if (array_key_exists('conditions', $data) || array_key_exists('condition', $data)) {
+			$raw = array_key_exists('conditions', $data) ? $data['conditions'] : $data['condition'];
+			$conditions = $this->normalizeConditions($raw, $section->getTemplateId(), $section->getId());
+			$this->assertNoAmbiguousCondition($section->getTemplateId(), $section->getId(), $conditions);
+			if ($conditions !== $section->getConditions()) {
+				$section->setConditions($conditions);
+				$changed = true;
+			}
+		}
+
 		if ($changed) {
 			$section = $this->sections->update($section);
 			$this->touch($template);
@@ -277,8 +380,14 @@ class TemplateService {
 		$this->assertCanEditContent($template);
 
 		$templateId = $section->getTemplateId();
+		$deletedStepIds = array_map(
+			static fn (TemplateStep $step): int => $step->getId(),
+			$this->steps->findBySection($id),
+		);
+
 		$this->sections->delete($section);
 		$this->normalizeSectionPositions($templateId);
+		$this->stripSectionReferences($templateId, $id, $deletedStepIds);
 		$this->touch($template);
 	}
 
@@ -544,6 +653,28 @@ class TemplateService {
 		return $template;
 	}
 
+	/**
+	 * Load a template the current user owns or administers.
+	 */
+	private function requireOwnerOrAdminTemplate(int $id): Template {
+		$template = $this->loadTemplate($id);
+		$uid = $this->currentUserId();
+		if (!$this->permissionService->isOwner($template, $uid) && !$this->groupManager->isAdmin($uid)) {
+			throw new ForbiddenException('not_owner');
+		}
+
+		return $template;
+	}
+
+	private function copyTitle(string $title): string {
+		$base = trim($title);
+		if ($base === '') {
+			return 'Copy';
+		}
+
+		return mb_substr('Copy of ' . $base, 0, self::MAX_TITLE_LENGTH);
+	}
+
 	private function requireSection(int $id): TemplateSection {
 		try {
 			return $this->sections->find($id);
@@ -669,6 +800,344 @@ class TemplateService {
 		}
 
 		return $notes;
+	}
+
+	/**
+	 * Validate and normalize section dependencies.
+	 *
+	 * @param mixed $raw
+	 * @return list<int>
+	 */
+	private function normalizeDependsOn(mixed $raw, int $templateId, ?int $sectionId): array {
+		if ($raw === null) {
+			return [];
+		}
+		if (!is_array($raw)) {
+			throw new ValidationException('invalid_field');
+		}
+
+		$known = [];
+		foreach ($this->sections->findByTemplate($templateId) as $section) {
+			$known[$section->getId()] = true;
+		}
+
+		$ids = [];
+		foreach ($raw as $value) {
+			if (is_int($value) || (is_string($value) && preg_match('/^[0-9]+$/', $value) === 1)) {
+				$ids[] = (int)$value;
+			} else {
+				throw new ValidationException('section_dependency_unknown');
+			}
+		}
+		$ids = array_values(array_unique($ids));
+
+		foreach ($ids as $id) {
+			if ($sectionId !== null && $id === $sectionId) {
+				throw new ValidationException('section_self_dependency');
+			}
+			if (!isset($known[$id])) {
+				throw new ValidationException('section_dependency_unknown');
+			}
+		}
+
+		return $ids;
+	}
+
+	/**
+	 * Reject a dependency cycle in the template's section graph.
+	 *
+	 * @param array<int, list<int>> $override
+	 */
+	private function assertNoDependencyCycles(int $templateId, array $override): void {
+		$graph = [];
+		foreach ($this->sections->findByTemplate($templateId) as $section) {
+			$graph[$section->getId()] = $section->getDependsOnIds();
+		}
+		foreach ($override as $id => $deps) {
+			$graph[$id] = $deps;
+		}
+
+		$visiting = [];
+		$done = [];
+		foreach (array_keys($graph) as $id) {
+			if ($this->hasCycle($id, $graph, $visiting, $done)) {
+				throw new ValidationException('section_dependency_cycle');
+			}
+		}
+	}
+
+	/**
+	 * @param array<int, list<int>> $graph
+	 * @param array<int, bool> $visiting
+	 * @param array<int, bool> $done
+	 */
+	private function hasCycle(int $id, array $graph, array &$visiting, array &$done): bool {
+		if (isset($done[$id])) {
+			return false;
+		}
+		if (isset($visiting[$id])) {
+			return true;
+		}
+		$visiting[$id] = true;
+		foreach ($graph[$id] ?? [] as $dep) {
+			if (isset($graph[$dep]) && $this->hasCycle($dep, $graph, $visiting, $done)) {
+				return true;
+			}
+		}
+		unset($visiting[$id]);
+		$done[$id] = true;
+
+		return false;
+	}
+
+	/**
+	 * Validate and normalize a section's condition gate.
+	 *
+	 * Accepts the canonical list of conditions (combined with AND semantics) or
+	 * a legacy single-condition object, which is upgraded to a one-element list.
+	 * Duplicate and contradictory conditions inside one gate are rejected.
+	 *
+	 * @param mixed $raw
+	 * @return list<array<string, mixed>>
+	 */
+	private function normalizeConditions(mixed $raw, int $templateId, ?int $sectionId): array {
+		if ($raw === null) {
+			return [];
+		}
+		if (!is_array($raw)) {
+			throw new ValidationException('invalid_condition');
+		}
+
+		// Legacy single-condition object (`{"stepId":...}`).
+		if (!array_is_list($raw)) {
+			$raw = [$raw];
+		}
+
+		$conditions = [];
+		$signatures = [];
+		foreach ($raw as $entry) {
+			if (!is_array($entry) || array_is_list($entry)) {
+				throw new ValidationException('invalid_condition');
+			}
+			$condition = $this->normalizeCondition($entry, $templateId, $sectionId);
+			$signature = json_encode($condition, JSON_THROW_ON_ERROR);
+			if (isset($signatures[$signature])) {
+				throw new ValidationException('duplicate_section_condition');
+			}
+			$signatures[$signature] = true;
+			$conditions[] = $condition;
+		}
+
+		$this->assertNoConflictingConditions($conditions);
+
+		return $conditions;
+	}
+
+	/**
+	 * Validate and normalize a single condition.
+	 *
+	 * The allowed operators come from {@see FlowService::operatorsForType()} so
+	 * authoring validation and snapshot evaluation share one definition.
+	 *
+	 * @param array<string, mixed> $raw
+	 * @return array<string, mixed>
+	 */
+	private function normalizeCondition(array $raw, int $templateId, ?int $sectionId): array {
+		$stepId = $raw['stepId'] ?? null;
+		$operator = $raw['operator'] ?? null;
+		if ((!is_int($stepId) && !(is_string($stepId) && preg_match('/^[0-9]+$/', $stepId) === 1)) || !is_string($operator)) {
+			throw new ValidationException('invalid_condition');
+		}
+		$stepId = (int)$stepId;
+
+		$step = $this->findTemplateStep($templateId, $stepId);
+		if ($step === null) {
+			throw new ValidationException('condition_step_not_found');
+		}
+
+		// A condition must not reference a step of its own section: the section
+		// could never become available because its gate would depend on a step
+		// executed after it. Conditions on previous sections remain valid.
+		if ($sectionId !== null && $step->getSectionId() === $sectionId) {
+			throw new ValidationException('condition_references_own_section');
+		}
+
+		$type = StepType::tryFrom($step->getType());
+		if ($type === null || $type === StepType::File) {
+			throw new ValidationException('invalid_condition');
+		}
+
+		if (!FlowService::isOperatorAllowed($type, $operator)) {
+			throw new ValidationException('invalid_condition_operator');
+		}
+
+		$condition = ['stepId' => $stepId, 'operator' => $operator];
+
+		if ($type === StepType::Check || $type === StepType::Confirmation) {
+			return $condition;
+		}
+
+		$value = $raw['value'] ?? null;
+		if ($type === StepType::Number) {
+			if (!is_int($value) && !is_float($value) && !(is_string($value) && is_numeric($value))) {
+				throw new ValidationException('invalid_condition_value');
+			}
+			$condition['value'] = (float)$value;
+		} elseif ($type === StepType::Select) {
+			$options = $step->getConfigArray()['options'] ?? null;
+			$allowedValues = [];
+			if (is_array($options)) {
+				foreach ($options as $option) {
+					if (is_string($option)) {
+						$allowedValues[] = $option;
+					}
+				}
+			}
+			if (!is_string($value) || !in_array($value, $allowedValues, true)) {
+				throw new ValidationException('invalid_condition_value');
+			}
+			$condition['value'] = $value;
+		} else {
+			if (!is_string($value) || trim($value) === '') {
+				throw new ValidationException('invalid_condition_value');
+			}
+			$condition['value'] = $value;
+		}
+
+		return $condition;
+	}
+
+	/**
+	 * Reject a gate whose conditions contradict each other, so a section can
+	 * never become permanently unsatisfiable by accident.
+	 *
+	 * @param list<array<string, mixed>> $conditions
+	 */
+	private function assertNoConflictingConditions(array $conditions): void {
+		$byStep = [];
+		foreach ($conditions as $condition) {
+			$stepId = (int)($condition['stepId'] ?? 0);
+			foreach ($byStep[$stepId] ?? [] as $other) {
+				if ($this->conditionsConflict($other, $condition)) {
+					throw new ValidationException('conflicting_section_conditions');
+				}
+			}
+			$byStep[$stepId][] = $condition;
+		}
+	}
+
+	/**
+	 * @param array<string, mixed> $left
+	 * @param array<string, mixed> $right
+	 */
+	private function conditionsConflict(array $left, array $right): bool {
+		$leftOperator = (string)($left['operator'] ?? '');
+		$rightOperator = (string)($right['operator'] ?? '');
+
+		if (in_array($leftOperator, ['is_true', 'is_false'], true)
+			&& in_array($rightOperator, ['is_true', 'is_false'], true)) {
+			return $leftOperator !== $rightOperator;
+		}
+
+		$isEquality = static fn (string $operator): bool => in_array($operator, ['equals', 'not_equals'], true);
+		if (!$isEquality($leftOperator) || !$isEquality($rightOperator)) {
+			return false;
+		}
+
+		$sameValue = $this->conditionValuesEqual($left['value'] ?? null, $right['value'] ?? null);
+		if ($leftOperator === 'equals' && $rightOperator === 'equals') {
+			return !$sameValue;
+		}
+		if ($leftOperator === 'not_equals' && $rightOperator === 'not_equals') {
+			// Excluding two different values is satisfiable.
+			return false;
+		}
+
+		// equals versus not_equals: conflicting only for the same value.
+		return $sameValue;
+	}
+
+	/**
+	 * @param mixed $left
+	 * @param mixed $right
+	 */
+	private function conditionValuesEqual(mixed $left, mixed $right): bool {
+		if (is_numeric($left) && is_numeric($right)) {
+			return abs((float)$left - (float)$right) < 1e-9;
+		}
+
+		return $left === $right;
+	}
+
+	private function findTemplateStep(int $templateId, int $stepId): ?TemplateStep {
+		foreach ($this->sections->findByTemplate($templateId) as $section) {
+			foreach ($this->steps->findBySection($section->getId()) as $step) {
+				if ($step->getId() === $stepId) {
+					return $step;
+				}
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Reject a second section carrying an identical condition gate (ambiguous
+	 * alternative). Mutually exclusive operators are the author's
+	 * responsibility; exact duplicates are always rejected.
+	 *
+	 * @param list<array<string, mixed>> $newConditions
+	 */
+	private function assertNoAmbiguousCondition(int $templateId, ?int $sectionId, array $newConditions): void {
+		if ($newConditions === []) {
+			return;
+		}
+		$signature = json_encode($newConditions, JSON_THROW_ON_ERROR);
+
+		foreach ($this->sections->findByTemplate($templateId) as $section) {
+			if ($sectionId !== null && $section->getId() === $sectionId) {
+				continue;
+			}
+			$existing = $section->getConditions();
+			if ($existing !== [] && json_encode($existing, JSON_THROW_ON_ERROR) === $signature) {
+				throw new ValidationException('duplicate_section_condition');
+			}
+		}
+	}
+
+	/**
+	 * Remove references to a deleted section from the remaining flow graph.
+	 *
+	 * @param list<int> $deletedStepIds
+	 */
+	private function stripSectionReferences(int $templateId, int $deletedSectionId, array $deletedStepIds): void {
+		foreach ($this->sections->findByTemplate($templateId) as $section) {
+			$changed = false;
+
+			$deps = $section->getDependsOnIds();
+			if (in_array($deletedSectionId, $deps, true)) {
+				$section->setDependsOnIds(array_values(array_filter($deps, static fn (int $dep): bool => $dep !== $deletedSectionId)));
+				$changed = true;
+			}
+
+			$conditions = $section->getConditions();
+			if ($conditions !== []) {
+				$kept = [];
+				foreach ($conditions as $condition) {
+					if (!in_array((int)($condition['stepId'] ?? 0), $deletedStepIds, true)) {
+						$kept[] = $condition;
+					}
+				}
+				if ($kept !== $conditions) {
+					$section->setConditions($kept);
+					$changed = true;
+				}
+			}
+
+			if ($changed) {
+				$this->sections->update($section);
+			}
+		}
 	}
 
 	private function normalizeAssignee(?string $assignee): ?string {

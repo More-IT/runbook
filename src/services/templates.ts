@@ -103,6 +103,28 @@ export async function archiveTemplate(id: number): Promise<Template> {
 }
 
 /**
+ * Restore an archived template to the active listing.
+ *
+ * @param id Template identifier.
+ */
+export async function unarchiveTemplate(id: number): Promise<Template> {
+	const { data } = await axios.post<{ template: Template }>(endpoint(`/templates/${id}/unarchive`))
+
+	return data.template
+}
+
+/**
+ * Duplicate a template into a new draft owned by the current user.
+ *
+ * @param id Template identifier.
+ */
+export async function duplicateTemplate(id: number): Promise<Template> {
+	const { data } = await axios.post<{ template: Template }>(endpoint(`/templates/${id}/duplicate`))
+
+	return data.template
+}
+
+/**
  * Append a section to a template.
  *
  * @param templateId Parent template identifier.

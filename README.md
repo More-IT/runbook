@@ -105,6 +105,26 @@ Milestone 0.2.0 — UX and collaboration:
   (actor, timestamp, affected section/step and, where safe, previous/new
   values) while keeping file contents and storage paths out of the log.
 
+Milestone 0.3.0 — Process flows and dependencies:
+
+- Archived templates can be unarchived by the owner or a Nextcloud
+  administrator. The template returns to the active listing (published when it
+  had been published before, otherwise draft) without touching its sections,
+  steps, versions or ACL.
+- Templates can be duplicated (owner or Nextcloud administrator only) into an
+  independent draft owned by the user who duplicated them. Sections, steps and
+  their configuration are copied; runs, activity, comments, evidence and the
+  source ACL are never copied.
+- Runs can be permanently deleted by the owner or a Nextcloud administrator in
+  any state. Deletion removes the run, its sections, steps, ACL, activity,
+  comments, mentions and notification ledger rows, and deletes the stored
+  evidence files first so no orphaned files remain.
+
+> The interactive process-flow engine (issues #15–#21) is **implemented**:
+> section dependencies, parallel sections, response conditions, alternative
+> paths, controlled returns and flow completion rules. See "Process flows"
+> below.
+
 > Recurring runs, conditional steps, template import/export, calendar, Talk,
 > webhooks, API tokens, automation and AI are **not** implemented.
 
@@ -785,9 +805,15 @@ Notes:
 ## Frontend quality checks
 
 ```bash
-npm run lint        # ESLint (Nextcloud configuration)
-npm run typecheck   # vue-tsc type checking
+npm run lint           # ESLint (Nextcloud configuration)
+npm run typecheck      # vue-tsc type checking
+npm run test:frontend  # Node test runner: section state/reason rendering (EN/PT-PT/PT-BR)
 ```
+
+`npm run test:frontend` runs the dependency-free frontend tests for the section
+flow UI. They load the real `@nextcloud/l10n` translator with the shipped
+catalogs and assert the exact rendered status/reason strings, including step
+titles containing quotes, apostrophes, ampersands and HTML-like text.
 
 ## PHP quality checks
 
@@ -816,7 +842,14 @@ and with `$l->t()` in PHP. Source strings are English and are prepared for the
 Nextcloud translation workflow:
 
 - `l10n/en.json` and `l10n/en.js` are the English source translation files.
-- `l10n/pt_PT.json` and `l10n/pt_PT.js` provide European Portuguese.
+- `l10n/pt_PT.json` and `l10n/pt_PT.js` are the **canonical Portuguese source**.
+- `l10n/pt_BR.json` and `l10n/pt_BR.js` provide Brazilian Portuguese and
+  currently use **exactly the same values as `pt_PT`, character for character**.
+  `pt_BR` should only diverge through an intentional, accepted translation
+  update (for example via the official Nextcloud translation platform). The app
+  always resolves the catalog matching the user's Nextcloud locale (`pt_PT` or
+  `pt_BR`); it never falls back from `pt_BR` to `pt_PT`, so both catalogs must
+  exist.
 - Error `reason` codes returned by the API are mapped to translated messages in
   the frontend (`src/utils/apiError.ts`); notification subjects, Dashboard
   labels, search labels, administration settings labels and activity labels are
@@ -828,19 +861,25 @@ Translation workflow:
 
 1. Add the new string with `t('runbook', 'Text')` in Vue or `$l->t('Text')` in
    PHP. Never hardcode user-facing text.
-2. Add the English source string to `l10n/en.json` and `l10n/en.js` (keys and
-   values match the source string).
+2. Add the English source string to `l10n/en.json`.
 3. Translate the string into every other locale, keeping the same keys and the
    same `{placeholder}` tokens. Plural forms are declared per locale
-   (`nplurals=2; plural=(n != 1);` for English and Portuguese).
-4. Validate the translation files:
+   (`nplurals=2; plural=(n != 1);` for English and Portuguese). `pt_BR` must
+   currently keep the same values as `pt_PT`.
+4. Regenerate the JavaScript catalogs from the JSON sources with
+   `composer l10n:generate`. Never hand-edit the `.js` files: the generator
+   writes the canonical `OC.L10N.register("runbook", { ... }, pluralForm)`
+   structure and repairs keys that leaked outside the `translations` object.
+5. Validate the translation files:
 
    ```bash
    composer validate:json
    ```
 
-   The command checks JSON validity, key parity with `en.json` and placeholder
-   parity, and fails on mismatches.
+   The command checks JSON validity, key parity with `en.json`, placeholder
+   parity, that no translation keys exist outside the `translations` object,
+   that the generated `.js` mirrors the `.json`, and that `pt_BR` mirrors
+   `pt_PT`.
 
 ## Backend
 
@@ -903,6 +942,168 @@ public Nextcloud Settings API.
 Milestone 7 does not add a database migration; all settings are stored through
 the typed Nextcloud app configuration API.
 
+## Process flows
+
+Issues #15–#21 add a process-flow model on top of the linear templates. Linear
+templates (no dependencies, no conditions) keep their exact previous behaviour.
+
+### Data model
+
+Each template section and each run section may declare:
+
+- `dependsOn`: a list of sibling section ids that must resolve before the
+  section becomes available.
+- `condition`: an optional `{ stepId, operator, value }` reference to a step in
+  the same template.
+
+Both columns are nullable and stored as portable JSON in
+`runbook_template_sections.depends_on`, `runbook_template_sections.condition_config`
+and their `runbook_run_sections` counterparts (migration
+`Version0008Date20260801000000`, `lib/Migration/Version0008Date20260801000000.php`).
+Start-run copies the configuration into the run snapshot, mapping template
+section/step ids to the newly created run section/step ids; later template edits
+never affect existing runs.
+
+### Section states
+
+Flow state is always derived at read time by `lib/Service/FlowService.php` and is
+never persisted:
+
+| State | Meaning |
+| --- | --- |
+| `inapplicable` | The section condition is false. |
+| `blocked` | A prerequisite section is unresolved, or the controlling step is unanswered. `blockedBy` lists the offending section titles / step title. |
+| `resolved` | Empty section, or every step is completed/skipped. |
+| `active` | At least one step is in progress. |
+| `available` | Otherwise; the section may be worked on. |
+
+A dependency is satisfied when the prerequisite is `resolved` **or**
+`inapplicable`. `inapplicable` steps count as skipped for progress and never
+block completion. Blocked required steps still block completion until their
+dependencies are satisfied. The run detail API returns `state` and `blockedBy`
+per section; My Work, the overview and the Dashboard widget surface actionable
+steps only from `available`/`active` sections.
+
+### Conditions
+
+A section may declare zero or more conditions. Every condition of a section
+belongs to a single gate and they are combined with a logical **AND**: the
+section applies only when *all* of its conditions hold. Alternative (OR)
+branches are modelled explicitly as sibling sections with mutually exclusive
+conditions, never by mixing conditions inside one section. A condition that
+cannot be decided yet (its controlling step is unanswered) keeps the section
+`blocked`; a decided-false condition makes it `inapplicable`. Evaluation never
+depends on the section's position: every section, including the final one, runs
+through the same algorithm.
+
+A missing or empty response never satisfies a condition: it keeps the gate
+pending, so `not_equals` cannot become true merely because a value is absent.
+Numeric values are coerced and compared as floats with a tolerance for decimals.
+
+`inapplicable` and `blocked` sections also expose a structured, read-only
+`reason` alongside `blockedBy` (see the run detail API): the controlling step
+title, the operator and the expected value — never the stored response. The run
+detail UI renders it as plain text through Vue interpolation (never `v-html`),
+with Unicode quotation marks around step titles and a ` — ` separator after the
+status. HTML escaping is left entirely to Vue, so step titles containing quotes,
+ampersands or HTML-like text are safe and are never shown as HTML entities.
+
+Conditions reference a step in the template (possibly in another section) and
+are validated against its type when the section is saved:
+
+| Step type | Operators |
+| --- | --- |
+| `CHECK`, `CONFIRMATION` | `is_true`, `is_false` |
+| `NUMBER` | `equals`, `not_equals`, `greater_than`, `less_than`, `greater_or_equal`, `less_or_equal` |
+| `SELECT`, `TEXT`, `DATE`, `USER` | `equals`, `not_equals` |
+| `FILE` | not configurable |
+
+The operator map is defined once in `FlowService::operatorsByType()` and mirrored
+by `CONDITION_OPERATORS_BY_TYPE` in `src/models/template.ts`; a unit test asserts
+the two stay identical, so authoring validation, run-snapshot evaluation and the
+frontend can never disagree.
+
+Template validation (`lib/Service/TemplateService.php`) rejects unknown section
+references, self-dependencies, dependency cycles (depth-first traversal),
+conditions that reference a missing step, operators/values that are invalid for
+the referenced step type, duplicate conditions inside one gate, contradictory
+conditions inside one gate (e.g. `equals` with two different values, or
+`is_true` together with `is_false`), and two sibling sections that share an
+identical condition gate (ambiguous alternative paths). When a section or step is
+deleted, references to it are stripped from the remaining sections in the same
+save. A legacy single-condition payload (`condition`) is still accepted and
+upgraded to a one-element list.
+
+### Returns
+
+`RunStepService::returnStep()` (owner or step assignee, active run, closed step)
+and `RunService::returnSection()` (owner, active run) record a mandatory
+`reason` (max length enforced) and reopen the affected steps to `PENDING`
+without deleting responses, evidence or activity. Returning a step preserves
+its stored response and records a `step_returned` activity; returning a section
+reopens all completed/skipped steps in it and records a `section_returned`
+activity. Endpoints: `POST /api/v1/run-steps/{id}/return` and
+`POST /api/v1/run-sections/{id}/return`.
+
+### Completion
+
+A run may be completed only when every applicable required step is resolved.
+Sections/steps that are blocked because of unsatisfied dependencies are not
+counted as pending actionable work, but they still block completion once their
+dependencies are satisfied. Detail, My Work, the overview and the Dashboard
+widget share this definition.
+
+## Template import and export (planned)
+
+Template import/export is intentionally **not implemented yet** and is deferred
+to a separate, focused change after the flow engine is stable. The design below
+is the recommended extension point; it reuses the existing authoring services
+rather than adding new persistence.
+
+- **Endpoints**
+  - `GET /api/v1/templates/{id}/export` — returns a portable JSON document for a
+    template the user can at least view.
+  - `POST /api/v1/templates/import` — creates a new `DRAFT` template owned by the
+    importing user.
+  - (optional) `POST /api/v1/templates/{id}/import` — replaces an editable
+    template's content; owner/editor only.
+- **Payload format** — a versioned envelope. Cross-references use **stable local
+  ids** assigned by the document, not database ids, because ids are not portable
+  across instances:
+
+  ```json
+  {
+    "format": "runbook-template",
+    "schemaVersion": 1,
+    "template": { "title": "Deploy", "description": "..." },
+    "sections": [
+      { "ref": "s1", "title": "Start", "description": "", "notes": "",
+        "dependsOn": [], "conditions": [] },
+      { "ref": "s2", "title": "Production", "dependsOn": ["s1"],
+        "conditions": [{ "stepRef": "t1", "operator": "equals", "value": "prod" }] }
+    ],
+    "steps": [
+      { "ref": "t1", "sectionRef": "s1", "title": "Environment", "type": "SELECT",
+        "required": true, "position": 0, "config": { "options": ["dev", "prod"] },
+        "defaultAssignee": null, "dueOffset": null }
+    ]
+  }
+  ```
+
+- **Validation rules** — import must pass exactly the same server-side rules as
+  authoring (`lib/Service/TemplateService.php`): valid title/description/notes,
+  known section/step references, no self-dependency, no dependency cycles,
+  conditions referencing an existing step of a **previous** section, an operator
+  valid for the step type, a value valid for the step type, no duplicate or
+  contradictory conditions in a gate, and no duplicate condition gate across
+  sections. Unknown `schemaVersion` values are rejected. Server-managed fields
+  (`id`, `uuid`, `owner`, timestamps, `status`, ACL entries) are ignored on
+  import and regenerated. Import always lands as `DRAFT`, so publishing and ACL
+  assignment stay explicit owner actions.
+- **Why deferred** — the flow engine's snapshot isolation, validation and reason
+  metadata must be frozen first; import/export then only serialises and
+  re-validates the same model, which keeps the change low-risk.
+
 ## Known limitations
 
 - The retention period is stored and validated but **not** enforced: Runbook does
@@ -935,11 +1136,26 @@ the typed Nextcloud app configuration API.
 
 ## Release
 
-- **Version:** 0.2.0 (`appinfo/info.xml`, `package.json`).
+- **Version:** 0.3.0 (`appinfo/info.xml`, `package.json`).
 - **Nextcloud:** 33.
 - **PHP:** 8.2 – 8.5.
 - **Databases:** MySQL/MariaDB, PostgreSQL and SQLite.
 - **License:** AGPL-3.0-or-later.
+
+### v0.3.0
+
+Process flows for templates and runs: sections can depend on other sections and
+carry typed conditions, several sections can run in parallel, alternative paths
+are selected by conditions, and an owner or assignee can return a step or a
+section for correction with a recorded reason. See "Process flows" above.
+
+- **Data model:** nullable `depends_on` and `condition_config` columns on
+  `runbook_template_sections` and `runbook_run_sections` (migration
+  `Version0008Date20260801000000`); the flow is copied into the run snapshot at
+  start.
+- **Validation:** unknown references, self-dependencies, cycles, invalid
+  operators/values and ambiguous sibling conditions are rejected on save.
+- **Compatibility:** linear templates keep their exact previous behaviour.
 
 ### v0.1.1
 
@@ -1007,7 +1223,7 @@ php build/create-package.php
 ```
 
 `build/create-package.php` writes a staging tree with runtime files only and
-creates `runbook-0.2.0.tar.gz` (archive root `runbook/`). It validates the
+creates `runbook-0.3.0.tar.gz` (archive root `runbook/`). It validates the
 staging tree with `build/validate-package.php` before archiving. Validate an
 existing tree at any time with `composer package:check`.
 

@@ -50,6 +50,40 @@ foreach ($jsonFiles as $file) {
 	}
 	if (!is_array($decoded) || !isset($decoded['translations']) || !is_array($decoded['translations'])) {
 		$errors[] = basename($file) . ' is not a valid translation file';
+		continue;
+	}
+
+	// Translation keys must live inside "translations": stray root keys are
+	// silently ignored by Nextcloud and hide a broken localization build.
+	$rootKeys = array_keys($decoded);
+	sort($rootKeys);
+	if ($rootKeys !== ['pluralForm', 'translations']) {
+		$errors[] = sprintf(
+			'%s has unexpected root keys (%s); expected only "translations" and "pluralForm"',
+			basename($file),
+			implode(', ', $rootKeys),
+		);
+	}
+
+	/** @var array<string, string> $translations */
+	$translations = $decoded['translations'];
+
+	// The generated .js is what Nextcloud loads at runtime and must mirror the
+	// JSON source exactly.
+	$jsPath = preg_replace('/\.json$/', '.js', $file) ?? '';
+	if (!is_file($jsPath)) {
+		$errors[] = basename($file) . ' has no generated .js counterpart';
+	} else {
+		$js = (string)file_get_contents($jsPath);
+		if (!str_starts_with($js, 'OC.L10N.register(')) {
+			$errors[] = basename($jsPath) . ' does not start with OC.L10N.register(';
+		}
+		foreach (array_keys($translations) as $key) {
+			$encoded = json_encode((string)$key, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+			if (!is_string($encoded) || !str_contains($js, $encoded)) {
+				$errors[] = sprintf('%s is missing the key: %s', basename($jsPath), $key);
+			}
+		}
 	}
 }
 
@@ -76,6 +110,44 @@ if (is_file($enPath)) {
 		if (count($translated['translations']) !== count($en['translations'])) {
 			$errors[] = sprintf('%s has a different number of keys than en.json', $name);
 		}
+	}
+}
+
+// pt_BR intentionally mirrors pt_PT until a dedicated translation update
+// diverges them; the two catalogs must stay byte-for-value identical.
+$ptPtPath = $root . '/l10n/pt_PT.json';
+$ptBrPath = $root . '/l10n/pt_BR.json';
+if (is_file($ptPtPath) && is_file($ptBrPath)) {
+	try {
+		$ptPt = json_decode((string)file_get_contents($ptPtPath), true, 512, JSON_THROW_ON_ERROR);
+		$ptBr = json_decode((string)file_get_contents($ptBrPath), true, 512, JSON_THROW_ON_ERROR);
+		$ptPtTranslations = [];
+		if (is_array($ptPt) && isset($ptPt['translations']) && is_array($ptPt['translations'])) {
+			foreach ($ptPt['translations'] as $key => $value) {
+				if (is_string($value)) {
+					$ptPtTranslations[(string)$key] = $value;
+				}
+			}
+		}
+		$ptBrTranslations = [];
+		if (is_array($ptBr) && isset($ptBr['translations']) && is_array($ptBr['translations'])) {
+			foreach ($ptBr['translations'] as $key => $value) {
+				if (is_string($value)) {
+					$ptBrTranslations[(string)$key] = $value;
+				}
+			}
+		}
+		if (array_keys($ptPtTranslations) !== array_keys($ptBrTranslations)) {
+			$errors[] = 'pt_BR.json must have the same keys as pt_PT.json';
+		}
+		foreach ($ptBrTranslations as $key => $value) {
+			if (!array_key_exists($key, $ptPtTranslations) || $ptPtTranslations[$key] !== $value) {
+				$errors[] = 'pt_BR.json must currently mirror pt_PT.json for: ' . $key;
+				break;
+			}
+		}
+	} catch (\JsonException $exception) {
+		$errors[] = 'pt_PT.json / pt_BR.json are not valid JSON: ' . $exception->getMessage();
 	}
 }
 

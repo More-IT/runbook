@@ -17,7 +17,7 @@ use OCP\IRequest;
  * @phpstan-import-type SectionData from TemplateSection
  */
 class SectionController extends ApiController {
-	private const FIELDS = ['title', 'description', 'notes'];
+	private const FIELDS = ['title', 'description', 'notes', 'dependsOn', 'condition', 'conditions'];
 
 	public function __construct(
 		string $appName,

@@ -127,7 +127,13 @@ class RunControllerTest extends TestCase {
 			->with(1)
 			->willReturn([
 				'run' => $run,
-				'sections' => [['section' => $section, 'steps' => [$step]]],
+				'sections' => [[
+					'section' => $section,
+					'steps' => [$step],
+					'state' => 'available',
+					'blockedBy' => [],
+					'reason' => [],
+				]],
 				'progress' => $progress,
 				'permissions' => $permissions,
 			]);
@@ -137,6 +143,7 @@ class RunControllerTest extends TestCase {
 		self::assertSame(200, $response->getStatus());
 		self::assertSame($progress, $response->getData()['progress']);
 		self::assertSame('Step', $response->getData()['sections'][0]['steps'][0]['title']);
+		self::assertSame([], $response->getData()['sections'][0]['reason']);
 	}
 
 	public function testCompleteReturnsCompletedRun(): void {

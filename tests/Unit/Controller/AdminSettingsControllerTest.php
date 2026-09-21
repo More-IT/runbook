@@ -7,6 +7,7 @@ namespace OCA\Runbook\Tests\Unit\Controller;
 use OCA\Runbook\Controller\AdminSettingsController;
 use OCA\Runbook\Service\AdminSettings;
 use OCA\Runbook\Service\TemplateCreationPolicyService;
+use OCP\IGroupManager;
 use OCP\IRequest;
 use OCP\IUser;
 use OCP\IUserSession;
@@ -18,6 +19,8 @@ class AdminSettingsControllerTest extends TestCase {
 	private AdminSettings $settings;
 	/** @var TemplateCreationPolicyService&MockObject */
 	private TemplateCreationPolicyService $creationPolicy;
+	/** @var IGroupManager&MockObject */
+	private IGroupManager $groupManager;
 
 	protected function setUp(): void {
 		$this->settings = $this->createMock(AdminSettings::class);
@@ -27,6 +30,8 @@ class AdminSettingsControllerTest extends TestCase {
 			'commentsEnabled' => true,
 		]);
 		$this->creationPolicy = $this->createMock(TemplateCreationPolicyService::class);
+		$this->groupManager = $this->createMock(IGroupManager::class);
+		$this->groupManager->method('isAdmin')->willReturn(false);
 	}
 
 	/**
@@ -47,7 +52,7 @@ class AdminSettingsControllerTest extends TestCase {
 		$session = $this->createMock(IUserSession::class);
 		$session->method('getUser')->willReturn($user);
 
-		return new AdminSettingsController('runbook', $request, $this->settings, $this->creationPolicy, $session);
+		return new AdminSettingsController('runbook', $request, $this->settings, $this->creationPolicy, $session, $this->groupManager);
 	}
 
 	public function testIndexReturnsSettingsAndBounds(): void {
@@ -95,5 +100,7 @@ class AdminSettingsControllerTest extends TestCase {
 		self::assertFalse($features['runReopenEnabled']);
 		self::assertSame(26214400, $features['maxAttachmentSize']);
 		self::assertTrue($features['canCreateTemplates']);
+		self::assertSame('bob', $features['uid']);
+		self::assertFalse($features['isAdmin']);
 	}
 }

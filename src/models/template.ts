@@ -40,6 +40,46 @@ export interface StepConfig {
 	[key: string]: unknown
 }
 
+export type ConditionOperator
+	= | 'is_true'
+		| 'is_false'
+		| 'equals'
+		| 'not_equals'
+		| 'greater_than'
+		| 'less_than'
+		| 'greater_or_equal'
+		| 'less_or_equal'
+
+export interface StepCondition {
+	stepId: number
+	operator: ConditionOperator
+	value?: string | number | boolean
+}
+
+/**
+ * Operators accepted per step type. Mirrors FlowService::operatorsByType() on
+ * the server so authoring, evaluation and display never diverge.
+ */
+export const CONDITION_OPERATORS_BY_TYPE: Record<StepType, ConditionOperator[]> = {
+	CHECK: ['is_true', 'is_false'],
+	CONFIRMATION: ['is_true', 'is_false'],
+	NUMBER: ['equals', 'not_equals', 'greater_than', 'less_than', 'greater_or_equal', 'less_or_equal'],
+	TEXT: ['equals', 'not_equals'],
+	SELECT: ['equals', 'not_equals'],
+	DATE: ['equals', 'not_equals'],
+	USER: ['equals', 'not_equals'],
+	FILE: [],
+}
+
+/**
+ * Operators accepted for a step type.
+ *
+ * @param type Step type.
+ */
+export function conditionOperatorsForType(type: StepType): ConditionOperator[] {
+	return CONDITION_OPERATORS_BY_TYPE[type] ?? []
+}
+
 export interface Template {
 	id: number
 	uuid: string
@@ -61,6 +101,9 @@ export interface TemplateSection {
 	description: string
 	notes: string
 	position: number
+	dependsOn: number[]
+	condition: StepCondition | null
+	conditions: StepCondition[]
 }
 
 export interface TemplateStep {
@@ -133,6 +176,9 @@ export interface SectionPayload {
 	title?: string
 	description?: string
 	notes?: string
+	dependsOn?: number[]
+	condition?: StepCondition | null
+	conditions?: StepCondition[]
 }
 
 export interface StepPayload {

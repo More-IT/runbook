@@ -77,6 +77,10 @@ function eventLabel(type: ActivityType): string {
 			return t('runbook', 'Step skipped')
 		case 'step_reopened':
 			return t('runbook', 'Step reopened')
+		case 'step_returned':
+			return t('runbook', 'Step returned')
+		case 'section_returned':
+			return t('runbook', 'Section returned')
 		case 'comment_added':
 			return t('runbook', 'Comment added')
 		case 'comment_edited':
@@ -139,6 +143,11 @@ function eventDetail(event: RunActivityEvent): string | null {
 	const next = valueLabel(event.metadata.new)
 	if (previous !== null || next !== null) {
 		parts.push(`${previous ?? '—'} → ${next ?? '—'}`)
+	}
+
+	const reason = event.metadata.reason
+	if (typeof reason === 'string' && reason !== '') {
+		parts.push(reason)
 	}
 
 	return parts.length > 0 ? parts.join(' · ') : null

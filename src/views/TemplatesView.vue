@@ -31,7 +31,7 @@ const emit = defineEmits<{
 	open: [id: number]
 }>()
 
-const { templates, loading, error, refresh, create, remove } = useTemplateList()
+const { templates, loading, error, refresh, create, remove, duplicate, unarchive } = useTemplateList()
 
 const features = ref<AppFeatures | null>(null)
 const showCreate = ref(false)
@@ -39,13 +39,32 @@ const createTitle = ref('')
 const createDescription = ref('')
 const creating = ref(false)
 const pendingDelete = ref<Template | null>(null)
+const pendingUnarchive = ref<Template | null>(null)
 const deleting = ref(false)
+const unarchiving = ref(false)
+const duplicatingId = ref<number | null>(null)
 
 const visibleTemplates = computed<Template[]>(() => props.archivedOnly
 	? templates.value.filter((template) => template.status === 'ARCHIVED')
 	: templates.value)
 
 const canCreate = computed<boolean>(() => features.value?.canCreateTemplates ?? true)
+
+/**
+ * Whether the current user may duplicate a template.
+ *
+ * Only the template owner or a Nextcloud administrator may duplicate; the
+ * server enforces this again, the UI simply hides the action.
+ *
+ * @param template Template to check.
+ */
+function canDuplicate(template: Template): boolean {
+	if (features.value === null) {
+		return false
+	}
+
+	return features.value.uid === template.owner || features.value.isAdmin
+}
 
 onMounted(() => {
 	void refresh()
@@ -101,6 +120,35 @@ async function confirmDelete(): Promise<void> {
 		pendingDelete.value = null
 	}
 }
+
+/**
+ * Restore the pending archived template.
+ */
+async function confirmUnarchive(): Promise<void> {
+	if (pendingUnarchive.value === null) {
+		return
+	}
+	unarchiving.value = true
+	const restored = await unarchive(pendingUnarchive.value.id)
+	unarchiving.value = false
+	if (restored !== null) {
+		pendingUnarchive.value = null
+	}
+}
+
+/**
+ * Duplicate a template and open the copy.
+ *
+ * @param template Template to duplicate.
+ */
+async function duplicateTemplate(template: Template): Promise<void> {
+	duplicatingId.value = template.id
+	const copy = await duplicate(template.id)
+	duplicatingId.value = null
+	if (copy !== null) {
+		emit('open', copy.id)
+	}
+}
 </script>
 
 <template>
@@ -151,6 +199,12 @@ async function confirmDelete(): Promise<void> {
 					<NcButton @click="emit('open', template.id)">
 						{{ t('runbook', 'Open') }}
 					</NcButton>
+					<NcButton v-if="canDuplicate(template)" :disabled="duplicatingId === template.id" @click="duplicateTemplate(template)">
+						{{ t('runbook', 'Duplicate') }}
+					</NcButton>
+					<NcButton v-if="template.status === 'ARCHIVED'" @click="pendingUnarchive = template">
+						{{ t('runbook', 'Unarchive') }}
+					</NcButton>
 					<NcButton variant="error" @click="pendingDelete = template">
 						{{ t('runbook', 'Delete') }}
 					</NcButton>
@@ -179,6 +233,15 @@ async function confirmDelete(): Promise<void> {
 			:busy="deleting"
 			@confirm="confirmDelete"
 			@cancel="pendingDelete = null" />
+
+		<ConfirmDialog
+			v-if="pendingUnarchive !== null"
+			:name="t('runbook', 'Unarchive template')"
+			:message="t('runbook', 'Restore this template to the active list. New runs can be started once it is published.')"
+			:confirmLabel="t('runbook', 'Unarchive')"
+			:busy="unarchiving"
+			@confirm="confirmUnarchive"
+			@cancel="pendingUnarchive = null" />
 	</section>
 </template>
 

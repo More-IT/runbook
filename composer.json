@@ -50,6 +50,7 @@
         "test:security": "phpunit --filter \"Authorization|Hardening|Notification\"",
         "validate:xml": "php build/validate-xml.php",
         "validate:json": "php build/validate-json.php",
+        "l10n:generate": "php build/l10n.php",
         "package:check": "php build/validate-package.php"
     }
 }

@@ -101,6 +101,15 @@ export async function reopenRun(id: number): Promise<Run> {
 }
 
 /**
+ * Permanently delete a run the current user owns or administers.
+ *
+ * @param id Run identifier.
+ */
+export async function deleteRun(id: number): Promise<void> {
+	await axios.delete(endpoint(`/runs/${id}`))
+}
+
+/**
  * Mark a pending step as in progress.
  *
  * @param id Run step identifier.
@@ -159,6 +168,18 @@ export async function reopenStep(id: number): Promise<RunStep> {
 }
 
 /**
+ * Return a completed or skipped step to execution for correction.
+ *
+ * @param id Run step identifier.
+ * @param reason Mandatory return reason.
+ */
+export async function returnStep(id: number, reason: string): Promise<RunStep> {
+	const { data } = await axios.post<{ step: RunStep }>(endpoint(`/run-steps/${id}/return`), { reason })
+
+	return data.step
+}
+
+/**
  * Update the assignee and/or due date of a run step.
  *
  * @param id Run step identifier.
@@ -180,6 +201,18 @@ export async function updateRunSectionNotes(sectionId: number, notes: string): P
 	const { data } = await axios.patch<{ section: RunSection }>(endpoint(`/run-sections/${sectionId}`), { notes })
 
 	return data.section
+}
+
+/**
+ * Return every resolved step of a run section to execution for correction.
+ *
+ * @param sectionId Run section identifier.
+ * @param reason Mandatory return reason.
+ */
+export async function returnRunSection(sectionId: number, reason: string): Promise<RunStep[]> {
+	const { data } = await axios.post<{ steps: RunStep[] }>(endpoint(`/run-sections/${sectionId}/return`), { reason })
+
+	return data.steps
 }
 
 /**

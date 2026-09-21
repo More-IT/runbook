@@ -58,7 +58,7 @@ class RunController extends ApiController {
 	}
 
 	/**
-	 * @return JSONResponse<Http::STATUS_OK, array{run: RunData, sections: list<array{section: RunSectionData, steps: list<RunStepData>}>, progress: array{total: int, completed: int, skipped: int, pending: int, percentage: int, canComplete: bool}, permissions: array{role: string|null, canManage: bool, canModify: bool, canCancel: bool, canReopen: bool, canManageAssignments: bool, executableStepIds: list<int>}}, array{}>
+	 * @return JSONResponse<Http::STATUS_OK, array{run: RunData, sections: list<array{section: RunSectionData, steps: list<RunStepData>, state: string, blockedBy: list<string>, reason: list<array<string, mixed>>}>, progress: array{total: int, completed: int, skipped: int, pending: int, percentage: int, canComplete: bool}, permissions: array{role: string|null, canManage: bool, canModify: bool, canCancel: bool, canReopen: bool, canManageAssignments: bool, executableStepIds: list<int>}}, array{}>
 	 */
 	#[NoAdminRequired]
 	public function show(): JSONResponse {
@@ -70,7 +70,13 @@ class RunController extends ApiController {
 				static fn (RunStep $step): array => $step->toArray(),
 				$entry['steps'],
 			);
-			$sections[] = ['section' => $entry['section']->toArray(), 'steps' => $steps];
+			$sections[] = [
+				'section' => $entry['section']->toArray(),
+				'steps' => $steps,
+				'state' => $entry['state'],
+				'blockedBy' => $entry['blockedBy'],
+				'reason' => $entry['reason'],
+			];
 		}
 
 		return new JSONResponse([
@@ -109,5 +115,15 @@ class RunController extends ApiController {
 		$run = $this->runService->reopenRun($this->requireId('id'));
 
 		return new JSONResponse(['run' => $run->toArray()]);
+	}
+
+	/**
+	 * @return JSONResponse<Http::STATUS_OK, array{success: bool}, array{}>
+	 */
+	#[NoAdminRequired]
+	public function destroy(): JSONResponse {
+		$this->runService->deleteRun($this->requireId('id'));
+
+		return new JSONResponse(['success' => true]);
 	}
 }

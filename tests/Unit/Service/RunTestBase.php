@@ -41,6 +41,7 @@ use OCA\Runbook\Service\CommentService;
 use OCA\Runbook\Service\DueNotificationService;
 use OCA\Runbook\Service\EvidenceStorage;
 use OCA\Runbook\Service\FileTypeDetector;
+use OCA\Runbook\Service\FlowService;
 use OCA\Runbook\Service\MentionService;
 use OCA\Runbook\Service\NotificationService;
 use OCA\Runbook\Service\PermissionService;
@@ -186,6 +187,7 @@ abstract class RunTestBase extends TestCase {
 	protected StepResponseValidator $validator;
 	protected PrincipalValidator $principalValidator;
 	protected RunAccessService $runAccess;
+	protected FlowService $flowService;
 	protected MentionService $mentionService;
 	protected NotificationService $notificationService;
 
@@ -254,6 +256,7 @@ abstract class RunTestBase extends TestCase {
 		$this->validator = new StepResponseValidator($this->userManager);
 		$this->principalValidator = new PrincipalValidator($this->userManager, $this->groupManager);
 		$this->runAccess = new RunAccessService($this->runAclMapper, $this->runStepMapper, $this->userManager, $this->groupManager);
+		$this->flowService = new FlowService();
 		$this->mentionService = new MentionService($this->commentMentionMapper, $this->userManager, $this->timeFactory);
 
 		$this->configureNotifications();
@@ -1038,6 +1041,10 @@ abstract class RunTestBase extends TestCase {
 			$this->activityServiceFor($uid),
 			$this->notificationService,
 			$this->adminSettings,
+			$this->attachmentMapper,
+			$this->evidenceStorage,
+			$this->groupManager,
+			$this->flowService,
 		);
 	}
 
@@ -1054,6 +1061,7 @@ abstract class RunTestBase extends TestCase {
 			$this->adminSettings,
 			$this->sessionFor($uid),
 			$this->timeFactory,
+			$this->flowService,
 		);
 	}
 
@@ -1134,6 +1142,7 @@ abstract class RunTestBase extends TestCase {
 			$this->sessionFor($uid),
 			$this->timeFactory,
 			$this->config,
+			$this->flowService,
 		);
 	}
 
