@@ -16,10 +16,12 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/package-links.php';
+
 $options = parseOptions($argv);
 $isPackage = isset($options['package']);
 $root = $isPackage ? rtrim($options['package'], "/\\") : dirname(__DIR__);
-$expectedVersion = $options['version'] ?? '0.3.0';
+$expectedVersion = $options['version'] ?? '0.4.0';
 
 $errors = [];
 $notes = [];
@@ -58,6 +60,21 @@ if ($isPackage) {
 			$errors[] = 'Secret or log file must not be packaged: ' . $relative;
 		}
 	}
+
+	// Every relative Markdown link in the packaged README must resolve inside
+	// the staged tree, so a package cannot silently omit referenced docs.
+	$readmePath = $root . '/README.md';
+	if (is_file($readmePath)) {
+		foreach (relativeMarkdownLinks((string)file_get_contents($readmePath)) as $link) {
+			if (isUnsafeRelativeLink($link)) {
+				$errors[] = 'Packaged README link escapes the package: ' . $link;
+				continue;
+			}
+			if (!file_exists($root . '/' . $link)) {
+				$errors[] = 'Packaged README link does not resolve: ' . $link;
+			}
+		}
+	}
 }
 
 $requiredFiles = [
@@ -77,6 +94,10 @@ $requiredFiles = [
 	'README.md',
 	'LICENSE',
 	'SECURITY.md',
+	// Documentation linked from README.md; the package-mode link check below
+	// verifies these resolve inside the staged tree.
+	'docs/ux-architecture.md',
+	'docs/manual-acceptance-checklist.md',
 ];
 
 foreach ($requiredFiles as $file) {

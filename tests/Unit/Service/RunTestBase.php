@@ -39,6 +39,7 @@ use OCA\Runbook\Service\AdminSettings;
 use OCA\Runbook\Service\AttachmentService;
 use OCA\Runbook\Service\CommentService;
 use OCA\Runbook\Service\DueNotificationService;
+use OCA\Runbook\Service\EvidenceLockService;
 use OCA\Runbook\Service\EvidenceStorage;
 use OCA\Runbook\Service\FileTypeDetector;
 use OCA\Runbook\Service\FlowService;
@@ -66,6 +67,8 @@ use OCP\IURLGenerator;
 use OCP\IUser;
 use OCP\IUserManager;
 use OCP\IUserSession;
+use OCP\Lock\ILockingProvider;
+use OCP\Lock\LockedException;
 use OCP\Notification\IManager as NotificationManager;
 use OCP\Notification\INotification;
 use OCP\Security\ISecureRandom;
@@ -190,6 +193,11 @@ abstract class RunTestBase extends TestCase {
 	protected FlowService $flowService;
 	protected MentionService $mentionService;
 	protected NotificationService $notificationService;
+	/** @var array<string, int> */
+	protected array $heldLocks = [];
+	/** @var ILockingProvider&MockObject */
+	protected ILockingProvider $lockingProvider;
+	protected EvidenceLockService $evidenceLock;
 
 	protected function setUp(): void {
 		$this->nextId = 1;
@@ -206,6 +214,23 @@ abstract class RunTestBase extends TestCase {
 		$this->secureRandom->method('generate')->willReturnCallback(
 			static fn (int $length, string $characters = ''): string => str_repeat('a', $length),
 		);
+
+		$this->heldLocks = [];
+		$this->lockingProvider = $this->createMock(ILockingProvider::class);
+		$this->lockingProvider->method('acquireLock')->willReturnCallback(function (string $path, int $type): void {
+			if (isset($this->heldLocks[$path])) {
+				throw new LockedException($path);
+			}
+			$this->heldLocks[$path] = $type;
+		});
+		$this->lockingProvider->method('releaseLock')->willReturnCallback(function (string $path, int $type): void {
+			unset($this->heldLocks[$path]);
+		});
+		$this->lockingProvider->method('isLocked')->willReturnCallback(
+			fn (string $path, int $type): bool => isset($this->heldLocks[$path]),
+		);
+		// Short retry budget so contention tests stay fast.
+		$this->evidenceLock = new EvidenceLockService($this->lockingProvider, 2, 0);
 
 		$this->config = $this->createMock(IConfig::class);
 		$this->config->method('getUserValue')->willReturnCallback(
@@ -883,6 +908,12 @@ abstract class RunTestBase extends TestCase {
 				static fn (Attachment $attachment): bool => $attachment->getStepId() === $stepId,
 			)),
 		);
+		$this->attachmentMapper->method('countByRunAndStep')->willReturnCallback(
+			fn (int $runId, int $stepId): int => count(array_filter(
+				$this->attachments,
+				static fn (Attachment $attachment): bool => $attachment->getRunId() === $runId && $attachment->getStepId() === $stepId,
+			)),
+		);
 
 		$this->activityMapper = $this->createMock(ActivityMapper::class);
 		$this->activityMapper->method('insert')->willReturnCallback(function (ActivityEvent $event): ActivityEvent {
@@ -1053,6 +1084,8 @@ abstract class RunTestBase extends TestCase {
 			$this->runMapper,
 			$this->runSectionMapper,
 			$this->runStepMapper,
+			$this->attachmentMapper,
+			$this->evidenceLock,
 			$this->runAccess,
 			$this->principalValidator,
 			$this->validator,
@@ -1120,6 +1153,7 @@ abstract class RunTestBase extends TestCase {
 			$this->attachmentMapper,
 			$this->runServiceFor($uid),
 			$this->runStepServiceFor($uid),
+			$this->evidenceLock,
 			$this->runAccess,
 			$this->evidenceStorage,
 			$this->activityServiceFor($uid),
@@ -1293,6 +1327,28 @@ abstract class RunTestBase extends TestCase {
 		$this->runSteps[$step->getId()] = $step;
 
 		return $step;
+	}
+
+	/**
+	 * Seed a persisted evidence attachment directly (bypassing upload rules) so
+	 * tests can exercise steps whose run state forbids a fresh upload.
+	 */
+	protected function addAttachment(int $runId, int $stepId, string $uploaderUid, string $filename = 'evidence.txt'): Attachment {
+		$attachment = new Attachment();
+		$attachment->setId($this->nextId++);
+		$attachment->setUuid('00000000-0000-4000-8000-000000000000');
+		$attachment->setRunId($runId);
+		$attachment->setStepId($stepId);
+		$attachment->setUploaderUid($uploaderUid);
+		$attachment->setFilename($filename);
+		$attachment->setStorageKey('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+		$attachment->setMimeType('text/plain');
+		$attachment->setSize(1);
+		$attachment->setChecksum(hash('sha256', 'x'));
+		$attachment->setCreatedAt($this->now);
+		$this->attachments[$attachment->getId()] = $attachment;
+
+		return $attachment;
 	}
 
 	protected function seedRunAcl(int $runId, string $principalType, string $principalId, string $role): RunAcl {

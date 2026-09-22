@@ -6,6 +6,7 @@
 <script setup lang="ts">
 import type { AppFeatures } from '../models/adminSettings.ts'
 import type { RunAttachment, RunDetail, RunSectionWithSteps, StepAssignmentPayload, StepResponse } from '../models/run.ts'
+import type { RunNavigationState } from '../utils/runNavigation.ts'
 
 import { translate as t } from '@nextcloud/l10n'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
@@ -22,10 +23,25 @@ import RunCommentsPanel from '../components/RunCommentsPanel.vue'
 import RunEvidencePanel from '../components/RunEvidencePanel.vue'
 import RunStatusBadge from '../components/RunStatusBadge.vue'
 import RunStepCard from '../components/RunStepCard.vue'
+import SectionNavigator from '../components/SectionNavigator.vue'
+import SectionStatus from '../components/SectionStatus.vue'
 import { getFeatures } from '../services/adminSettings.ts'
 import * as api from '../services/runs.ts'
 import { apiErrorMessage } from '../utils/apiError.ts'
-import { inapplicableReasonText, sectionStateLabel, STATUS_REASON_SEPARATOR } from '../utils/sectionReason.ts'
+import { attachmentsForStep as attachmentsForStepHelper } from '../utils/runEvidence.ts'
+import {
+	nextActionHint,
+	runProgressDisplay,
+	sectionOfStep,
+} from '../utils/runExecution.ts'
+import {
+	applyLoad,
+	beginLoad,
+	emptyNavigation,
+	isStaleLoad,
+	requestFocus,
+	selectSection as selectNavSection,
+} from '../utils/runNavigation.ts'
 
 const props = defineProps<{
 	runId: number
@@ -47,10 +63,39 @@ const error = ref<string | null>(null)
 const showCancel = ref(false)
 const showDelete = ref(false)
 
+/**
+ * Navigation state for the execution navigator. Selecting a section never
+ * changes flow state or grants an action; it only changes what is displayed.
+ * A deep link is a one-shot intent (`pendingFocusStepId`) that is applied once
+ * against the run it belongs to.
+ */
+const navigation = ref<RunNavigationState>(emptyNavigation())
+const selectedSectionId = computed<number | null>(() => navigation.value.selectedSectionId)
+/** Focused section container, focused on explicit user selection. */
+const sectionContainer = ref<HTMLElement | null>(null)
+/** Run the currently loaded `detail` belongs to. */
+const loadedRunId = ref<number | null>(null)
+/** Monotonic load sequence so an older request cannot overwrite a newer run. */
+let loadSequence = 0
+
 const runActive = computed<boolean>(() => detail.value?.run.status === 'ACTIVE')
 const steps = computed(() => detail.value?.sections.flatMap((entry) => entry.steps) ?? [])
 const stepTitles = computed<Record<number, string>>(() => Object.fromEntries(steps.value.map((step) => [step.id, step.title])))
 const commentSteps = computed(() => steps.value.map((step) => ({ id: step.id, title: step.title })))
+
+const progressDisplay = computed(() => (detail.value === null ? null : runProgressDisplay(detail.value)))
+const nextHint = computed(() => (detail.value === null ? { kind: 'idle' as const } : nextActionHint(detail.value)))
+const singleHint = computed(() => (nextHint.value.kind === 'single' ? nextHint.value : null))
+const optionsHint = computed(() => (nextHint.value.kind === 'options' ? nextHint.value : null))
+const showReadyHint = computed<boolean>(() => nextHint.value.kind === 'ready')
+const showWaitingHint = computed<boolean>(() => nextHint.value.kind === 'waiting')
+const selectedEntry = computed<RunSectionWithSteps | null>(() => {
+	if (detail.value === null || selectedSectionId.value === null) {
+		return null
+	}
+
+	return detail.value.sections.find((entry) => entry.section.id === selectedSectionId.value) ?? null
+})
 
 const commentsEnabled = computed<boolean>(() => features.value?.commentsEnabled ?? true)
 const stepReopenEnabled = computed<boolean>(() => features.value?.stepReopenEnabled ?? true)
@@ -60,7 +105,7 @@ const requireSkipReason = computed<boolean>(() => features.value?.requireSkipRea
 /**
  * Per-section collapse override. Only sections that are fully resolved
  * (every step completed or skipped) default to collapsed; unresolved sections
- * stay expanded. An explicit user toggle is remembered for the session.
+ * stay expanded. An explicit user toggle is remembered while the run is open.
  */
 const sectionOverrides = ref<Record<number, boolean>>({})
 const editingNotesId = ref<number | null>(null)
@@ -100,17 +145,21 @@ function toggleSection(entry: RunSectionWithSteps): void {
 }
 
 /**
- * Expand the section that contains the given step, if any.
+ * Focus a section without changing its flow state. This is only called for an
+ * explicit user selection, so it may move focus to the section content;
+ * background reloads never do.
  *
- * @param stepId Run step identifier.
+ * @param sectionId Run section identifier.
  */
-function expandSectionForStep(stepId: number): void {
-	const entry = detail.value?.sections.find((candidate) => candidate.steps.some((step) => step.id === stepId))
-	if (entry !== undefined && isCollapsed(entry)) {
-		sectionOverrides.value = { ...sectionOverrides.value, [entry.section.id]: false }
+async function selectSection(sectionId: number): Promise<void> {
+	if (sectionId === selectedSectionId.value) {
+		return
 	}
+	navigation.value = selectNavSection(navigation.value, sectionId)
+	await nextTick()
+	sectionContainer.value?.scrollIntoView({ block: 'nearest' })
+	sectionContainer.value?.focus({ preventScroll: true })
 }
-
 /**
  * Whether a section can be returned to execution for correction.
  *
@@ -180,61 +229,143 @@ function saveNotes(sectionId: number): void {
 }
 
 /**
+ * Reset run-scoped UI state (selection, collapse, inline editors) and drop any
+ * detail from a previously loaded run so it can never be used for navigation,
+ * selection or rendering.
+ */
+function resetViewState(): void {
+	navigation.value = emptyNavigation()
+	loadedRunId.value = null
+	detail.value = null
+	attachments.value = []
+	error.value = null
+	sectionOverrides.value = {}
+	editingNotesId.value = null
+	sectionReturnId.value = null
+	sectionReturnReason.value = ''
+	highlightedStepId.value = null
+}
+
+/**
+ * Load the run detail and its supporting data.
  *
+ * Each load gets a monotonic sequence so a slower earlier request (for example
+ * run A) can never overwrite the state of a newer one (run B).
  */
 async function load(): Promise<void> {
+	const runId = props.runId
+	const { sequence, latest } = beginLoad(loadSequence)
+	loadSequence = latest
+
 	loading.value = true
 	error.value = null
 	try {
 		const [run, files, flags] = await Promise.all([
-			api.getRun(props.runId),
-			api.listAttachments(props.runId),
+			api.getRun(runId),
+			api.listAttachments(runId),
 			getFeatures(),
 		])
+		if (isStaleLoad(sequence, loadSequence)) {
+			return
+		}
 		detail.value = run
+		loadedRunId.value = run.run.id
 		attachments.value = files
 		features.value = flags
 	} catch (caught) {
+		if (isStaleLoad(sequence, loadSequence)) {
+			return
+		}
 		error.value = apiErrorMessage(caught)
 	} finally {
-		loading.value = false
+		if (!isStaleLoad(sequence, loadSequence)) {
+			loading.value = false
+		}
 	}
 
-	// Focus after the loading state is cleared so the step anchors are rendered.
+	if (isStaleLoad(sequence, loadSequence)) {
+		return
+	}
+
+	// Reconcile selection and apply a pending deep-link intent once, after the
+	// loading state is cleared so the step anchors are rendered.
 	await applyStepFocus()
 }
 
-onMounted(load)
-watch(() => props.runId, load)
-watch(() => props.focusStepId, () => {
+onMounted(() => {
+	navigation.value = requestFocus(navigation.value, props.runId, props.focusStepId ?? null)
+	void load()
+})
+watch(() => props.runId, () => {
+	resetViewState()
+	navigation.value = requestFocus(navigation.value, props.runId, props.focusStepId ?? null)
+	void load()
+})
+watch(() => props.focusStepId, (value) => {
+	navigation.value = requestFocus(navigation.value, props.runId, value ?? null)
 	void applyStepFocus()
 })
 
 /**
- * Scroll to and highlight the step referenced by the current deep link.
+ * Scroll to and highlight a step, selecting and expanding its section first.
  *
- * The step only exists once the run detail has been loaded, so this is called
- * after every load as well as when the requested step changes.
+ * @param stepId Run step identifier.
+ * @param focus Whether to move keyboard focus to the step.
  */
-async function applyStepFocus(): Promise<void> {
-	const target = props.focusStepId ?? null
-	if (target === null || detail.value === null || !steps.value.some((step) => step.id === target)) {
+async function revealStep(stepId: number, focus: boolean): Promise<void> {
+	if (detail.value === null) {
+		return
+	}
+	const entry = sectionOfStep(detail.value, stepId)
+	if (entry === null) {
 		highlightedStepId.value = null
 		return
 	}
 
-	highlightedStepId.value = target
-	expandSectionForStep(target)
+	navigation.value = selectNavSection(navigation.value, entry.section.id)
+	if (isCollapsed(entry)) {
+		sectionOverrides.value = { ...sectionOverrides.value, [entry.section.id]: false }
+	}
+	highlightedStepId.value = stepId
 	await nextTick()
 
-	const container = root.value
-	const element = container?.querySelector<HTMLElement>(`[data-runbook-step-id="${target}"]`) ?? null
+	const element = root.value?.querySelector<HTMLElement>(`[data-runbook-step-id="${stepId}"]`) ?? null
 	if (element === null) {
 		return
 	}
-
 	element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-	element.focus({ preventScroll: true })
+	if (focus) {
+		element.focus({ preventScroll: true })
+	}
+}
+
+/**
+ * Reveal a step from the page (next-action shortcut).
+ *
+ * @param stepId Run step identifier.
+ */
+function focusStep(stepId: number): void {
+	// An explicit jump clears any pending deep-link intent for the current run.
+	navigation.value = requestFocus(navigation.value, props.runId, null)
+	void revealStep(stepId, true)
+}
+
+/**
+ * Reconcile navigation with the loaded run and apply a pending deep-link intent
+ * exactly once. The detail must belong to the current run, so an intent for run
+ * B is never consumed against the still-loaded detail of run A. Later reloads of
+ * the same run keep the user's selection.
+ */
+async function applyStepFocus(): Promise<void> {
+	if (detail.value === null || loadedRunId.value !== props.runId) {
+		return
+	}
+
+	const result = applyLoad(navigation.value, detail.value)
+	navigation.value = result.state
+	if (result.focusStepId !== null) {
+		await revealStep(result.focusStepId, true)
+	}
 }
 
 /**
@@ -323,12 +454,13 @@ function canExecuteStep(stepId: number): boolean {
 }
 
 /**
- * Evidence attachments belonging to a step.
+ * Evidence attachments belonging to a step, using the shared helper so the
+ * RunStepCard props are regression-tested.
  *
  * @param stepId Run step identifier.
  */
 function attachmentsForStep(stepId: number): RunAttachment[] {
-	return attachments.value.filter((attachment) => attachment.stepId === stepId)
+	return attachmentsForStepHelper(attachments.value, stepId)
 }
 
 /**
@@ -351,14 +483,14 @@ function deleteEvidence(id: number): void {
 }
 
 /**
- *
+ * Complete the run.
  */
 function completeRun(): void {
 	void mutate(() => api.completeRun(props.runId))
 }
 
 /**
- *
+ * Confirm cancelling the run.
  */
 function confirmCancel(): void {
 	showCancel.value = false
@@ -366,7 +498,7 @@ function confirmCancel(): void {
 }
 
 /**
- *
+ * Reopen a completed run.
  */
 function reopenRun(): void {
 	void mutate(() => api.reopenRun(props.runId))
@@ -402,14 +534,33 @@ function formatDate(timestamp: number): string {
 </script>
 
 <template>
-	<section ref="root" class="runbook-run">
-		<header class="runbook-run__header">
+	<section ref="root" class="runbook-exec">
+		<header class="runbook-exec__header">
 			<NcButton @click="emit('close')">
 				{{ t('runbook', 'Back to runs') }}
 			</NcButton>
+
+			<div v-if="detail !== null" class="runbook-exec__heading">
+				<h2 class="runbook-exec__title">
+					{{ detail.run.title }}
+				</h2>
+				<div class="runbook-exec__context">
+					<RunStatusBadge :status="detail.run.status" />
+					<span>{{ t('runbook', 'Template v{version}', { version: detail.run.templateVersion }) }}</span>
+					<span v-if="detail.permissions.role !== null && detail.permissions.role !== 'OWNER'">
+						{{ t('runbook', 'Your role: {role}', { role: detail.permissions.role }) }}
+					</span>
+					<span v-if="detail.run.dueAt !== null">
+						{{ t('runbook', 'Due {date}', { date: formatDate(detail.run.dueAt) }) }}
+					</span>
+				</div>
+				<p v-if="detail.run.description" class="runbook-exec__description">
+					{{ detail.run.description }}
+				</p>
+			</div>
 		</header>
 
-		<div v-if="loading" class="runbook-run__center">
+		<div v-if="loading" class="runbook-exec__center">
 			<NcLoadingIcon :name="t('runbook', 'Loading')" />
 		</div>
 
@@ -419,22 +570,6 @@ function formatDate(timestamp: number): string {
 			:description="error ?? t('runbook', 'The run could not be loaded.')" />
 
 		<template v-else>
-			<div class="runbook-run__meta">
-				<h2>{{ detail.run.title }}</h2>
-				<RunStatusBadge :status="detail.run.status" />
-				<span class="runbook-run__version">{{ t('runbook', 'Template v{version}', { version: detail.run.templateVersion }) }}</span>
-				<span v-if="detail.permissions.role !== null && detail.permissions.role !== 'OWNER'" class="runbook-run__version">
-					{{ t('runbook', 'Your role: {role}', { role: detail.permissions.role }) }}
-				</span>
-				<span v-if="detail.run.dueAt !== null" class="runbook-run__version">
-					{{ t('runbook', 'Due {date}', { date: formatDate(detail.run.dueAt) }) }}
-				</span>
-			</div>
-
-			<p v-if="detail.run.description" class="runbook-run__description">
-				{{ detail.run.description }}
-			</p>
-
 			<NcNoteCard v-if="error" type="error">
 				{{ error }}
 			</NcNoteCard>
@@ -442,189 +577,245 @@ function formatDate(timestamp: number): string {
 				{{ t('runbook', 'This run is read-only. Reopen it to continue execution.') }}
 			</NcNoteCard>
 
-			<div class="runbook-run__progress">
-				<NcProgressBar :value="detail.progress.percentage" />
-				<span class="runbook-run__progress-summary">
-					{{ t('runbook', 'Progress: {percent}%', { percent: detail.progress.percentage }) }}
-					({{ t('runbook', '{resolved} of {total} steps resolved', { resolved: detail.progress.completed + detail.progress.skipped, total: detail.progress.total }) }})
-				</span>
-				<span class="runbook-run__progress-breakdown">
-					<span class="runbook-run__progress-item runbook-run__progress-item--completed">
-						{{ t('runbook', 'Completed: {count}', { count: detail.progress.completed }) }}
+			<div v-if="progressDisplay" class="runbook-exec__progress">
+				<div v-if="progressDisplay.hasWork" class="runbook-exec__progress-bar">
+					<NcProgressBar :value="progressDisplay.percentage" />
+					<span class="runbook-exec__progress-summary">
+						{{ t('runbook', 'Progress: {percent}%', { percent: progressDisplay.percentage }) }}
+						—
+						{{ t('runbook', '{resolved} of {total} steps resolved', { resolved: progressDisplay.resolved, total: progressDisplay.totalSteps }) }}
 					</span>
-					<span class="runbook-run__progress-item runbook-run__progress-item--skipped">
-						{{ t('runbook', 'Skipped: {count}', { count: detail.progress.skipped }) }}
-					</span>
-					<span class="runbook-run__progress-item runbook-run__progress-item--pending">
-						{{ t('runbook', 'Pending: {count}', { count: detail.progress.pending }) }}
-					</span>
-				</span>
+				</div>
+				<p v-else class="runbook-exec__no-work">
+					{{ t('runbook', 'This run has no steps to complete.') }}
+				</p>
+
+				<ul class="runbook-exec__counts">
+					<li>{{ t('runbook', 'Sections: {count}', { count: progressDisplay.totalSections }) }}</li>
+					<li>{{ t('runbook', 'Total steps: {count}', { count: progressDisplay.totalSteps }) }}</li>
+					<li>{{ t('runbook', 'Completed: {count}', { count: progressDisplay.completed }) }}</li>
+					<li>{{ t('runbook', 'Skipped by user: {count}', { count: progressDisplay.skippedByUser }) }}</li>
+					<li>{{ t('runbook', 'Outside the current path: {count}', { count: progressDisplay.outsidePath }) }}</li>
+					<li>{{ t('runbook', 'Pending: {count}', { count: progressDisplay.pending }) }}</li>
+					<li v-if="progressDisplay.blocked > 0">
+						{{ t('runbook', 'Blocked: {count}', { count: progressDisplay.blocked }) }}
+					</li>
+				</ul>
 			</div>
 
-			<div class="runbook-run__actions">
-				<NcButton
-					v-if="detail.permissions.canModify"
-					variant="primary"
-					:disabled="busy || !detail.progress.canComplete"
-					@click="completeRun">
-					{{ t('runbook', 'Complete run') }}
-				</NcButton>
-				<NcButton v-if="detail.permissions.canCancel" :disabled="busy" @click="showCancel = true">
-					{{ t('runbook', 'Cancel run') }}
-				</NcButton>
-				<NcButton v-if="detail.permissions.canReopen && runReopenEnabled" :disabled="busy" @click="reopenRun">
-					{{ t('runbook', 'Reopen run') }}
-				</NcButton>
-				<NcButton
-					v-if="detail.permissions.canDelete"
-					variant="error"
-					:disabled="busy"
-					@click="showDelete = true">
-					{{ t('runbook', 'Delete run') }}
+			<div v-if="singleHint" class="runbook-exec__next">
+				<span>{{ t('runbook', 'Next: {step}', { step: singleHint.step.title }) }}</span>
+				<NcButton @click="focusStep(singleHint.step.id)">
+					{{ t('runbook', 'Go to step') }}
 				</NcButton>
 			</div>
+			<div v-else-if="optionsHint" class="runbook-exec__next">
+				<span v-if="optionsHint.startable > 0">
+					{{ t('runbook', '{count} steps can be started', { count: optionsHint.startable }) }}
+				</span>
+				<span v-if="optionsHint.continuable > 0">
+					{{ t('runbook', '{count} steps are in progress', { count: optionsHint.continuable }) }}
+				</span>
+			</div>
+			<div v-else-if="showReadyHint" class="runbook-exec__next">
+				<span>{{ t('runbook', 'All required steps are resolved. You can complete the run.') }}</span>
+			</div>
+			<div v-else-if="showWaitingHint" class="runbook-exec__next">
+				<span>{{ t('runbook', 'Waiting for other steps to become available.') }}</span>
+			</div>
 
-			<RunAclEditor
-				v-if="detail.permissions.canManage"
-				:runId="runId"
-				:owner="detail.run.owner"
-				:readOnly="!runActive" />
-
-			<div class="runbook-run__sections">
-				<div v-for="entry in detail.sections" :key="entry.section.id" class="runbook-run__section">
-					<div class="runbook-run__section-header">
-						<h3>{{ entry.section.title }}</h3>
-						<NcButton
-							v-if="entry.steps.length > 0"
-							variant="tertiary"
-							:aria-expanded="!isCollapsed(entry)"
-							:aria-label="isCollapsed(entry) ? t('runbook', 'Expand section {title}', { title: entry.section.title }) : t('runbook', 'Collapse section {title}', { title: entry.section.title })"
-							@click="toggleSection(entry)">
-							{{ isCollapsed(entry) ? t('runbook', 'Expand') : t('runbook', 'Collapse') }}
-						</NcButton>
-					</div>
-
-					<div
-						v-if="entry.state === 'blocked' || entry.state === 'inapplicable' || entry.state === 'active'"
-						class="runbook-run__section-flow">
-						<span class="runbook-run__section-state">{{ sectionStateLabel(t, entry.state) }}</span>
-						<template v-if="entry.blockedBy.length > 0">
-							<span class="runbook-run__section-separator">{{ STATUS_REASON_SEPARATOR }}</span>
-							<span class="runbook-run__section-blocked">
-								{{ t('runbook', 'Waiting for: {sections}', { sections: entry.blockedBy.join(', ') }, { escape: false, sanitize: false }) }}
-							</span>
-						</template>
-						<template v-if="entry.state === 'inapplicable' && inapplicableReasonText(t, entry) !== ''">
-							<span class="runbook-run__section-separator">{{ STATUS_REASON_SEPARATOR }}</span>
-							<span class="runbook-run__section-blocked">
-								{{ t('runbook', 'Reason:') }} {{ inapplicableReasonText(t, entry) }}
-							</span>
-						</template>
-					</div>
-
-					<p v-if="entry.section.description" class="runbook-run__description">
-						{{ entry.section.description }}
-					</p>
-
-					<div
-						v-if="entry.section.notes !== '' || editingNotesId === entry.section.id || (detail.permissions.canManage && runActive)"
-						class="runbook-run__section-notes">
-						<NcTextArea
-							v-if="editingNotesId === entry.section.id"
-							v-model="notesDraft"
-							:label="t('runbook', 'Section notes')" />
-						<p v-else-if="entry.section.notes !== ''" class="runbook-run__notes-text">
-							{{ entry.section.notes }}
-						</p>
-						<div v-if="detail.permissions.canManage && runActive" class="runbook-run__notes-actions">
-							<template v-if="editingNotesId === entry.section.id">
-								<NcButton variant="primary" :disabled="busy" @click="saveNotes(entry.section.id)">
-									{{ t('runbook', 'Save notes') }}
-								</NcButton>
-								<NcButton @click="editingNotesId = null">
-									{{ t('runbook', 'Cancel') }}
-								</NcButton>
-							</template>
-							<NcButton v-else @click="startNotes(entry)">
-								{{ t('runbook', 'Edit notes') }}
-							</NcButton>
-						</div>
-					</div>
-
-					<div v-if="canReturnSection(entry)" class="runbook-run__section-return">
-						<NcButton v-if="sectionReturnId !== entry.section.id" @click="startSectionReturn(entry.section.id)">
-							{{ t('runbook', 'Reopen section') }}
-						</NcButton>
-						<template v-else>
-							<NcTextArea v-model="sectionReturnReason" :label="t('runbook', 'Return reason')" />
-							<div class="runbook-run__notes-actions">
-								<NcButton
-									:disabled="busy || sectionReturnReason.trim() === ''"
-									variant="primary"
-									@click="submitSectionReturn(entry.section.id)">
-									{{ t('runbook', 'Confirm return') }}
-								</NcButton>
-								<NcButton @click="sectionReturnId = null">
-									{{ t('runbook', 'Cancel') }}
-								</NcButton>
-							</div>
-						</template>
-					</div>
-
-					<div v-show="!isCollapsed(entry)">
-						<div
-							v-for="step in entry.steps"
-							:key="step.id"
-							class="runbook-run__step-anchor"
-							:class="{ 'runbook-run__step-anchor--highlighted': highlightedStepId === step.id }"
-							:data-runbook-step-id="step.id"
-							tabindex="-1">
-							<RunStepCard
-								:step="step"
-								:runActive="runActive"
-								:canExecute="canExecuteStep(step.id)"
-								:canManageAssignments="detail.permissions.canManageAssignments"
-								:attachments="attachmentsForStep(step.id)"
-								:canUploadEvidence="runActive && canExecuteStep(step.id)"
-								:uid="detail.permissions.uid"
-								:isOwner="detail.permissions.canManage"
-								:canReopen="stepReopenEnabled"
-								:requireSkipReason="requireSkipReason"
-								@start="startStep(step.id)"
-								@save="(response) => saveStep(step.id, response)"
-								@complete="(response) => completeStep(step.id, response)"
-								@skip="(reason) => skipStep(step.id, reason)"
-								@reopen="reopenStep(step.id)"
-								@return="(reason) => returnStep(step.id, reason)"
-								@assign="(payload) => assignStep(step.id, payload)"
-								@uploadEvidence="(file) => uploadEvidence(step.id, file)"
-								@deleteEvidence="deleteEvidence" />
-						</div>
-					</div>
+			<div class="runbook-exec__actions">
+				<div class="runbook-exec__actions-primary">
+					<NcButton
+						v-if="detail.permissions.canModify"
+						variant="primary"
+						:disabled="busy || !detail.progress.canComplete"
+						@click="completeRun">
+						{{ t('runbook', 'Complete run') }}
+					</NcButton>
+					<NcButton v-if="detail.permissions.canReopen && runReopenEnabled" :disabled="busy" @click="reopenRun">
+						{{ t('runbook', 'Reopen run') }}
+					</NcButton>
+				</div>
+				<div class="runbook-exec__actions-destructive">
+					<NcButton v-if="detail.permissions.canCancel" :disabled="busy" @click="showCancel = true">
+						{{ t('runbook', 'Cancel run') }}
+					</NcButton>
+					<NcButton
+						v-if="detail.permissions.canDelete"
+						variant="error"
+						:disabled="busy"
+						@click="showDelete = true">
+						{{ t('runbook', 'Delete run') }}
+					</NcButton>
 				</div>
 			</div>
 
-			<RunEvidencePanel
-				:attachments="attachments"
-				:stepTitles="stepTitles"
-				:uid="detail.permissions.uid"
-				:isOwner="detail.permissions.canManage"
-				:active="runActive"
-				@remove="deleteEvidence" />
+			<div v-if="detail.sections.length === 0" class="runbook-exec__empty">
+				<NcEmptyContent
+					:name="t('runbook', 'This run has no sections.')"
+					:description="t('runbook', 'The template contains no sections to execute.')" />
+			</div>
 
-			<RunCommentsPanel
-				:runId="runId"
-				:uid="detail.permissions.uid"
-				:canComment="detail.permissions.canComment && commentsEnabled"
-				:active="runActive"
-				:steps="commentSteps" />
+			<div v-else class="runbook-exec__body">
+				<SectionNavigator
+					:sections="detail.sections"
+					:selectedId="selectedSectionId"
+					@select="selectSection" />
 
-			<RunActivityPanel :runId="runId" :stepTitles="stepTitles" />
+				<div class="runbook-exec__content">
+					<article
+						v-if="selectedEntry"
+						ref="sectionContainer"
+						class="runbook-exec__section"
+						tabindex="-1">
+						<div class="runbook-exec__section-header">
+							<h3 class="runbook-exec__section-title">
+								{{ selectedEntry.section.title }}
+							</h3>
+							<NcButton
+								v-if="selectedEntry.steps.length > 0"
+								variant="tertiary"
+								:aria-expanded="!isCollapsed(selectedEntry)"
+								:aria-label="isCollapsed(selectedEntry) ? t('runbook', 'Expand section {title}', { title: selectedEntry.section.title }) : t('runbook', 'Collapse section {title}', { title: selectedEntry.section.title })"
+								@click="toggleSection(selectedEntry)">
+								{{ isCollapsed(selectedEntry) ? t('runbook', 'Expand') : t('runbook', 'Collapse') }}
+							</NcButton>
+						</div>
 
-			<p v-if="detail.run.completedAt !== null" class="runbook-run__timestamps">
+						<SectionStatus
+							:state="selectedEntry.state"
+							:steps="selectedEntry.steps"
+							:reasons="selectedEntry.reason"
+							:blockedBy="selectedEntry.blockedBy" />
+
+						<p v-if="selectedEntry.section.description" class="runbook-exec__description">
+							{{ selectedEntry.section.description }}
+						</p>
+
+						<div
+							v-if="selectedEntry.section.notes !== '' || editingNotesId === selectedEntry.section.id || (detail.permissions.canManage && runActive)"
+							class="runbook-exec__section-notes">
+							<NcTextArea
+								v-if="editingNotesId === selectedEntry.section.id"
+								v-model="notesDraft"
+								:label="t('runbook', 'Section notes')" />
+							<p v-else-if="selectedEntry.section.notes !== ''" class="runbook-exec__notes-text">
+								{{ selectedEntry.section.notes }}
+							</p>
+							<div v-if="detail.permissions.canManage && runActive" class="runbook-exec__notes-actions">
+								<template v-if="editingNotesId === selectedEntry.section.id">
+									<NcButton variant="primary" :disabled="busy" @click="saveNotes(selectedEntry.section.id)">
+										{{ t('runbook', 'Save notes') }}
+									</NcButton>
+									<NcButton @click="editingNotesId = null">
+										{{ t('runbook', 'Cancel') }}
+									</NcButton>
+								</template>
+								<NcButton v-else @click="startNotes(selectedEntry)">
+									{{ t('runbook', 'Edit notes') }}
+								</NcButton>
+							</div>
+						</div>
+
+						<div v-if="canReturnSection(selectedEntry)" class="runbook-exec__section-return">
+							<NcButton v-if="sectionReturnId !== selectedEntry.section.id" @click="startSectionReturn(selectedEntry.section.id)">
+								{{ t('runbook', 'Reopen section') }}
+							</NcButton>
+							<template v-else>
+								<NcTextArea v-model="sectionReturnReason" :label="t('runbook', 'Return reason')" />
+								<div class="runbook-exec__notes-actions">
+									<NcButton
+										:disabled="busy || sectionReturnReason.trim() === ''"
+										variant="primary"
+										@click="submitSectionReturn(selectedEntry.section.id)">
+										{{ t('runbook', 'Confirm return') }}
+									</NcButton>
+									<NcButton @click="sectionReturnId = null">
+										{{ t('runbook', 'Cancel') }}
+									</NcButton>
+								</div>
+							</template>
+						</div>
+
+						<div v-show="!isCollapsed(selectedEntry)">
+							<div
+								v-for="step in selectedEntry.steps"
+								:key="step.id"
+								class="runbook-exec__step-anchor"
+								:class="{ 'runbook-exec__step-anchor--highlighted': highlightedStepId === step.id }"
+								:data-runbook-step-id="step.id"
+								tabindex="-1">
+								<RunStepCard
+									:step="step"
+									:runActive="runActive"
+									:canExecute="canExecuteStep(step.id)"
+									:canManageAssignments="detail.permissions.canManageAssignments"
+									:attachments="attachmentsForStep(step.id)"
+									:canUploadEvidence="runActive && canExecuteStep(step.id)"
+									:uid="detail.permissions.uid"
+									:isOwner="detail.permissions.canManage"
+									:canReopen="stepReopenEnabled"
+									:requireSkipReason="requireSkipReason"
+									@start="startStep(step.id)"
+									@save="(response) => saveStep(step.id, response)"
+									@complete="(response) => completeStep(step.id, response)"
+									@skip="(reason) => skipStep(step.id, reason)"
+									@reopen="reopenStep(step.id)"
+									@return="(reason) => returnStep(step.id, reason)"
+									@assign="(payload) => assignStep(step.id, payload)"
+									@uploadEvidence="(file) => uploadEvidence(step.id, file)"
+									@deleteEvidence="deleteEvidence" />
+							</div>
+						</div>
+					</article>
+				</div>
+			</div>
+
+			<section class="runbook-exec__supporting">
+				<h3 class="runbook-exec__supporting-title">
+					{{ t('runbook', 'Supporting information') }}
+				</h3>
+
+				<details class="runbook-exec__panel">
+					<summary>{{ t('runbook', 'Evidence') }}</summary>
+					<RunEvidencePanel
+						:attachments="attachments"
+						:stepTitles="stepTitles"
+						:uid="detail.permissions.uid"
+						:isOwner="detail.permissions.canManage"
+						:active="runActive"
+						@remove="deleteEvidence" />
+				</details>
+
+				<details class="runbook-exec__panel">
+					<summary>{{ t('runbook', 'Comments') }}</summary>
+					<RunCommentsPanel
+						:runId="runId"
+						:uid="detail.permissions.uid"
+						:canComment="detail.permissions.canComment && commentsEnabled"
+						:active="runActive"
+						:steps="commentSteps" />
+				</details>
+
+				<details class="runbook-exec__panel">
+					<summary>{{ t('runbook', 'Activity') }}</summary>
+					<RunActivityPanel :runId="runId" :stepTitles="stepTitles" />
+				</details>
+
+				<details v-if="detail.permissions.canManage" class="runbook-exec__panel">
+					<summary>{{ t('runbook', 'Participants') }}</summary>
+					<RunAclEditor
+						:runId="runId"
+						:owner="detail.run.owner"
+						:readOnly="!runActive" />
+				</details>
+			</section>
+
+			<p v-if="detail.run.completedAt !== null" class="runbook-exec__timestamps">
 				{{ t('runbook', 'Completed on {date}', { date: formatDate(detail.run.completedAt) }) }}
 			</p>
-			<p v-if="detail.run.cancelledAt !== null" class="runbook-run__timestamps">
+			<p v-if="detail.run.cancelledAt !== null" class="runbook-exec__timestamps">
 				{{ t('runbook', 'Cancelled on {date}', { date: formatDate(detail.run.cancelledAt) }) }}
 			</p>
 		</template>
@@ -650,145 +841,236 @@ function formatDate(timestamp: number): string {
 </template>
 
 <style scoped>
-.runbook-run {
-	padding: 16px;
+.runbook-exec {
+	display: flex;
+	flex-direction: column;
+	gap: var(--runbook-space-3);
+	max-width: var(--runbook-content-max);
+	margin-inline: auto;
+	padding: var(--runbook-space-4);
 }
 
-.runbook-run__header {
-	margin-bottom: 16px;
+.runbook-exec__header {
+	display: flex;
+	flex-direction: column;
+	gap: var(--runbook-space-2);
 }
 
-.runbook-run__center {
+.runbook-exec__title {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.runbook-exec__context {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--runbook-space-2) var(--runbook-space-3);
+	color: var(--runbook-text-muted);
+	font-size: var(--runbook-font-small);
+}
+
+.runbook-exec__description {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.runbook-exec__center {
 	display: flex;
 	justify-content: center;
-	padding: 32px;
+	padding: var(--runbook-space-5);
 }
 
-.runbook-run__meta {
+.runbook-exec__progress {
+	display: flex;
+	flex-direction: column;
+	gap: var(--runbook-space-2);
+	padding: var(--runbook-space-3);
+	border: 1px solid var(--runbook-border);
+	border-radius: var(--runbook-radius);
+	background-color: var(--runbook-surface-subtle);
+}
+
+.runbook-exec__progress-bar {
+	display: flex;
+	flex-direction: column;
+	gap: var(--runbook-space-1);
+}
+
+.runbook-exec__progress-summary,
+.runbook-exec__no-work {
+	margin: 0;
+	color: var(--runbook-text-muted);
+	font-size: var(--runbook-font-small);
+}
+
+.runbook-exec__counts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--runbook-space-1) var(--runbook-space-3);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	color: var(--runbook-text-muted);
+	font-size: var(--runbook-font-small);
+}
+
+.runbook-exec__next {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 8px;
-	margin-bottom: 8px;
+	gap: var(--runbook-space-2);
+	min-height: var(--runbook-target-min);
 }
 
-.runbook-run__version,
-.runbook-run__timestamps {
-	color: var(--color-text-maxcontrast, #555);
-	font-size: 0.85em;
-}
-
-.runbook-run__description {
-	color: var(--color-text-maxcontrast, #555);
-}
-
-.runbook-run__progress {
+.runbook-exec__actions {
 	display: flex;
 	flex-wrap: wrap;
-	align-items: center;
-	gap: 12px;
-	margin: 16px 0;
-}
-
-.runbook-run__progress-summary {
-	color: var(--color-text-maxcontrast, #555);
-}
-
-.runbook-run__progress-breakdown {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 12px;
-}
-
-.runbook-run__progress-item {
-	font-size: 0.85em;
-	font-weight: bold;
-}
-
-.runbook-run__progress-item--completed {
-	color: var(--color-success-element, #099f05);
-}
-
-.runbook-run__progress-item--skipped {
-	color: var(--color-warning-element, #bf7900);
-}
-
-.runbook-run__progress-item--pending {
-	color: var(--color-info-element, #0077c7);
-}
-
-.runbook-run__actions {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-	margin-bottom: 16px;
-}
-
-.runbook-run__section {
-	margin-bottom: 16px;
-}
-
-.runbook-run__section-header {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
 	justify-content: space-between;
-	gap: 8px;
+	align-items: center;
+	gap: var(--runbook-space-2);
 }
 
-.runbook-run__section-flow {
+.runbook-exec__actions-primary,
+.runbook-exec__actions-destructive {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 8px;
-	align-items: center;
-	margin: 4px 0;
-	font-size: 0.85em;
+	gap: var(--runbook-space-2);
 }
 
-.runbook-run__section-state {
-	font-weight: bold;
-	color: var(--color-text-maxcontrast, #555);
+.runbook-exec__actions-destructive {
+	padding-inline-start: var(--runbook-space-3);
+	border-inline-start: 1px solid var(--runbook-border);
 }
 
-.runbook-run__section-separator {
-	color: var(--color-text-maxcontrast, #555);
+.runbook-exec__body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--runbook-space-3);
 }
 
-.runbook-run__section-blocked {
-	color: var(--color-warning-element, #bf7900);
+.runbook-exec__content {
+	min-width: 0;
 }
 
-.runbook-run__section-return {
-	margin: 8px 0;
+.runbook-exec__section {
+	display: flex;
+	flex-direction: column;
+	gap: var(--runbook-space-2);
+	padding: var(--runbook-space-3);
+	border: 1px solid var(--runbook-border);
+	border-radius: var(--runbook-radius);
+	background-color: var(--runbook-surface);
 }
 
-.runbook-run__section-notes {
-	border-inline-start: 3px solid var(--color-border-dark, #ccc);
-	background-color: var(--color-background-hover, #f5f5f5);
-	border-radius: var(--border-radius, 4px);
-	padding: 8px;
-	margin: 8px 0;
+.runbook-exec__section-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--runbook-space-2);
 }
 
-.runbook-run__notes-text {
+.runbook-exec__section:focus-visible {
+	outline: var(--runbook-focus-ring);
+	outline-offset: 2px;
+}
+
+.runbook-exec__section-title {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.runbook-exec__section-notes {
+	border-inline-start: 3px solid var(--runbook-border-strong);
+	background-color: var(--runbook-surface-subtle);
+	border-radius: var(--runbook-radius);
+	padding: var(--runbook-space-2);
+}
+
+.runbook-exec__notes-text {
+	margin: 0;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	margin: 0 0 4px;
 }
 
-.runbook-run__notes-actions {
+.runbook-exec__notes-actions {
 	display: flex;
-	gap: 8px;
+	flex-wrap: wrap;
+	gap: var(--runbook-space-2);
+	margin-top: var(--runbook-space-2);
 }
 
-.runbook-run__step-anchor {
-	border-radius: var(--border-radius, 4px);
-	outline: none;
+.runbook-exec__section-return {
+	display: flex;
+	flex-direction: column;
+	gap: var(--runbook-space-2);
 }
 
-.runbook-run__step-anchor--highlighted {
-	outline: 3px solid var(--color-primary-element, #0082c9);
+.runbook-exec__step-anchor {
+	scroll-margin-top: var(--runbook-space-5);
+	border-radius: var(--runbook-radius);
+}
+
+.runbook-exec__step-anchor:focus-visible {
+	outline: var(--runbook-focus-ring);
 	outline-offset: 2px;
-	background-color: var(--color-primary-light, #e6f0f8);
+}
+
+.runbook-exec__step-anchor--highlighted {
+	box-shadow: 0 0 0 2px var(--runbook-accent-info);
+}
+
+.runbook-exec__supporting {
+	display: flex;
+	flex-direction: column;
+	gap: var(--runbook-space-2);
+	margin-top: var(--runbook-space-3);
+}
+
+.runbook-exec__supporting-title {
+	margin: 0;
+}
+
+.runbook-exec__panel {
+	border: 1px solid var(--runbook-border);
+	border-radius: var(--runbook-radius);
+	background-color: var(--runbook-surface);
+}
+
+.runbook-exec__panel > summary {
+	padding: var(--runbook-space-2) var(--runbook-space-3);
+	min-height: var(--runbook-target-min);
+	display: flex;
+	align-items: center;
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.runbook-exec__panel[open] > summary {
+	border-bottom: 1px solid var(--runbook-border);
+}
+
+.runbook-exec__timestamps {
+	margin: 0;
+	color: var(--runbook-text-muted);
+	font-size: var(--runbook-font-small);
+}
+
+@media (min-width: 900px) {
+	.runbook-exec__body {
+		flex-direction: row;
+		align-items: flex-start;
+	}
+
+	.runbook-exec__body > :first-child {
+		flex: 0 0 var(--runbook-nav-width, 260px);
+		position: sticky;
+		top: var(--runbook-space-4);
+	}
+
+	.runbook-exec__content {
+		flex: 1 1 auto;
+	}
 }
 </style>

@@ -33,6 +33,9 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Frontend tests
+        run: npm run test:frontend
+
       - name: Build
         run: npm run build
 
@@ -132,3 +135,6 @@ jobs:
 
       - name: Validate package
         run: composer package:check
+
+      - name: Create and validate a disposable package
+        run: php build/create-package.php --out="${{ runner.temp }}/runbook-package"

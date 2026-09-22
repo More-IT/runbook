@@ -304,4 +304,107 @@ class AttachmentServiceTest extends RunTestBase {
 		self::assertNotSame('secret.txt', $attachment->getStorageKey());
 		self::assertSame(32, strlen($attachment->getStorageKey()));
 	}
+
+	/**
+	 * @return array{0: \OCA\Runbook\Db\Run, 1: \OCA\Runbook\Db\RunStep}
+	 */
+	private function runWithFileStep(string $owner, bool $required): array {
+		$run = $this->addRun($owner);
+		$section = $this->addRunSection($run->getId(), 0);
+		$step = $this->addRunStep($section->getId(), 'FILE', $required, RunStepStatus::Pending->value, 0, [], PrincipalType::User->value, $owner);
+
+		return [$run, $step];
+	}
+
+	public function testCannotDeleteLastEvidenceFromCompletedRequiredFileStep(): void {
+		$this->addUser('alice');
+		[$run, $step] = $this->runWithFileStep('alice', true);
+		$attachment = $this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'evidence.txt', 'content' => 'x']);
+		$this->runStepServiceFor('alice')->complete($step->getId(), []);
+
+		try {
+			$this->attachmentServiceFor('alice')->delete($attachment->getId());
+			self::fail('Deleting the last evidence of a completed required FILE step must be rejected');
+		} catch (ConflictException $exception) {
+			self::assertSame('last_file_evidence_required', $exception->getReason());
+		}
+
+		self::assertCount(1, $this->attachments, 'the evidence must be kept');
+		self::assertCount(1, $this->evidenceFiles, 'the stored file must be kept');
+	}
+
+	public function testReplacementEvidenceAllowsDeletingTheOldAttachment(): void {
+		$this->addUser('alice');
+		[$run, $step] = $this->runWithFileStep('alice', true);
+		$first = $this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'old.txt', 'content' => 'old']);
+		$this->runStepServiceFor('alice')->complete($step->getId(), []);
+		$replacement = $this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'new.txt', 'content' => 'new']);
+
+		// With a replacement persisted, the old attachment may be removed.
+		$this->attachmentServiceFor('alice')->delete($first->getId());
+		self::assertCount(1, $this->attachments);
+		self::assertSame($replacement->getId(), array_key_first($this->attachments));
+
+		// The replacement is now the last one and cannot be removed.
+		$this->expectException(ConflictException::class);
+		$this->attachmentServiceFor('alice')->delete($replacement->getId());
+	}
+
+	public function testCanDeleteEvidenceFromCompletedOptionalFileStep(): void {
+		$this->addUser('alice');
+		[$run, $step] = $this->runWithFileStep('alice', false);
+		$attachment = $this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'evidence.txt', 'content' => 'x']);
+		$this->runStepServiceFor('alice')->complete($step->getId(), []);
+
+		$this->attachmentServiceFor('alice')->delete($attachment->getId());
+
+		self::assertSame([], $this->attachments);
+		self::assertSame([], $this->evidenceFiles);
+	}
+
+	public function testCanDeleteEvidenceFromCompletedRequiredNonFileStep(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$step = $this->addRunStep($section->getId(), 'CHECK', true, RunStepStatus::Pending->value, 0, [], PrincipalType::User->value, 'alice');
+		$attachment = $this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'evidence.txt', 'content' => 'x']);
+		$this->runStepServiceFor('alice')->complete($step->getId(), ['response' => true]);
+
+		$this->attachmentServiceFor('alice')->delete($attachment->getId());
+
+		self::assertSame([], $this->attachments);
+	}
+
+	public function testConcurrentDeletionIsRejectedWhileTheStepEvidenceLockIsHeld(): void {
+		$this->addUser('alice');
+		[$run, $step] = $this->runWithFileStep('alice', true);
+		$first = $this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'old.txt', 'content' => 'old']);
+		$replacement = $this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'new.txt', 'content' => 'new']);
+		$this->runStepServiceFor('alice')->complete($step->getId(), []);
+
+		// Simulate a second request already inside the critical section.
+		$path = $this->evidenceLock->path($run->getId(), $step->getId());
+		$this->heldLocks[$path] = \OCP\Lock\ILockingProvider::LOCK_EXCLUSIVE;
+		try {
+			$this->attachmentServiceFor('alice')->delete($first->getId());
+			self::fail('A concurrent deletion must not enter while the step evidence lock is held');
+		} catch (ConflictException $exception) {
+			self::assertSame('evidence_locked', $exception->getReason());
+		}
+		self::assertCount(2, $this->attachments, 'the concurrent deletion must not have removed anything');
+
+		// With the lock free again, one deletion is allowed and the last one is
+		// still protected.
+		unset($this->heldLocks[$path]);
+		$this->attachmentServiceFor('alice')->delete($first->getId());
+		self::assertCount(1, $this->attachments);
+
+		try {
+			$this->attachmentServiceFor('alice')->delete($replacement->getId());
+			self::fail('The last attachment must stay protected');
+		} catch (ConflictException $exception) {
+			self::assertSame('last_file_evidence_required', $exception->getReason());
+		}
+		self::assertCount(1, $this->attachments);
+	}
 }

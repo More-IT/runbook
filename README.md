@@ -2,10 +2,22 @@
 
 Create, execute and track repeatable procedures as structured, collaborative runbooks.
 
-This repository contains the Runbook Nextcloud app up to **Milestone 4
-(Work, assignments and due dates)**: app metadata, a Vue 3 + TypeScript
-frontend, a PHP backend with public Nextcloud APIs and the developer tooling
-needed to build, lint, analyse and test the code base.
+This repository contains the Runbook Nextcloud app: app metadata, a Vue 3 +
+TypeScript frontend, a PHP backend built on public Nextcloud APIs, and the
+developer tooling needed to build, lint, analyse and test the code base.
+
+It includes the feature milestones **0–7** (foundation, templates, access
+control, runs/execution, work/assignments/due dates, collaboration/evidence/
+activity, Nextcloud integrations and administration settings), the production
+fix releases **0.1.1**, **0.2.0** and **0.3.0**, and the **0.4.0 UX redesign and
+template import/export** work (issues #26–#33).
+
+> The numbered **"Milestone N"** labels used below are feature milestones and are
+> **not** the release version. The application version is **0.4.0**
+> (`appinfo/info.xml`) as a **release candidate packaged for manual acceptance**:
+> it is **not** a published, production-verified release and has not been uploaded
+> or deployed anywhere. The 0.4.0 UX and import/export work is code-complete and
+> awaits the real-Nextcloud acceptance run.
 
 ## Feature set
 
@@ -120,13 +132,37 @@ Milestone 0.3.0 — Process flows and dependencies:
   comments, mentions and notification ledger rows, and deletes the stored
   evidence files first so no orphaned files remain.
 
+Milestone 0.4.0 — UX redesign and template import/export (issues #26–#33):
+
+- A redesigned execution page and template editor on a shared design-token
+  system: flow-status badges, section navigator/outline, authoring rule
+  summaries, progress language and accessible reason lines.
+- App-shell navigation with hash deep links (`#/run/{runId}/step/{stepId}`,
+  `#/run/{runId}`, `#/template/{templateId}`, `#{section}`), Back/Forward
+  handling and a shared unsaved-changes guard.
+- Portable `schemaVersion` 1 template export (`GET .../templates/{id}/export`)
+  and import (`POST .../templates/import`), with authoring-rule validation,
+  transaction atomicity, a canonical 2 MB server limit and a 32 MB browser
+  source-file guard (see "Template export" and "Template import" below).
+- This milestone is **packaged as the 0.4.0 release candidate for manual
+  acceptance**; it is not a published or production-verified release. The
+  acceptance checklist is
+  [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md).
+
 > The interactive process-flow engine (issues #15–#21) is **implemented**:
 > section dependencies, parallel sections, response conditions, alternative
 > paths, controlled returns and flow completion rules. See "Process flows"
 > below.
 
-> Recurring runs, conditional steps, template import/export, calendar, Talk,
-> webhooks, API tokens, automation and AI are **not** implemented.
+> Template **export and import are implemented and hardened** (see "Template
+> export" and "Template import" below). The **0.4.0 release candidate** is
+> packaged for manual acceptance; the real-Nextcloud/browser acceptance checklist
+> is in
+> [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md).
+> Automated checks and package validation are not a substitute for that manual
+> acceptance. Template replacement and starting a run during import are **not**
+> implemented. Recurring runs, conditional steps, calendar, Talk, webhooks, API
+> tokens, automation and AI are **not** implemented either.
 
 ## ACL roles and permissions
 
@@ -202,6 +238,7 @@ A run has its own access list with two assignable roles:
 appinfo/            App metadata (info.xml) and routes
 build/stubs/        PHPStan stubs for runtime-only Nextcloud dependencies
 css/                Generated stylesheet (build output)
+docs/               UX architecture and manual acceptance checklist
 img/                App icon and static images
 js/                 Generated frontend bundle (build output)
 l10n/               Translation files
@@ -212,7 +249,7 @@ lib/Migration/      Database migrations
 lib/Service/        Business logic and domain exceptions
 src/                Vue 3 + TypeScript frontend sources
 templates/          PHP templates rendered by controllers
-tests/              PHPUnit tests
+tests/              PHPUnit and Node frontend tests (tests/fixtures holds shared fixtures)
 ```
 
 ## Install
@@ -250,12 +287,15 @@ Milestone 1 creates the following tables (with the configured `oc_` prefix):
 - `oc_runbook_templates`
 - `oc_runbook_template_sections`
 - `oc_runbook_template_steps`
-- `oc_runbook_template_acl`
 
 Sections and steps are linked with foreign keys using `ON DELETE CASCADE`, so
 deleting a template or section also deletes its children. Indexes are added for
 the template owner, the template status, the section template id and the step
 section id.
+
+Milestone 2 adds the template access list:
+
+- `oc_runbook_template_acl`
 
 The ACL table stores one row per principal with a unique constraint on
 `(template_id, principal_type, principal_id)`, a foreign key to
@@ -309,9 +349,10 @@ Oracle is not declared because the required table name
 - Migrations use only public Nextcloud schema abstractions
   (`ISchemaWrapper`/`Doctrine\DBAL\Schema\Table`); no database-specific SQL is
   written.
-- Each milestone adds one ordered, additive migration
-  (`Version0001…` through `Version0007…`). Migration names and versions are
-  ordered and never rewritten after release.
+- Each schema change adds one ordered, additive migration
+  (`Version0001…` through `Version0008…`; the numbers follow the migration
+  sequence and do not always match a feature-milestone number). Migration names
+  and versions are ordered and never rewritten after release.
 - Structural changes are guarded with `hasTable`, `hasColumn` and `hasIndex`
   checks, so a partially applied upgrade is safe to re-run.
 - Foreign keys have intentional delete behavior: template/section/step children
@@ -340,11 +381,15 @@ HTTP status code (`400`, `403`, `404`, `409`).
 | ------ | ---- | ----------- |
 | `GET` | `/apps/runbook/api/v1/templates` | List visible templates |
 | `POST` | `/apps/runbook/api/v1/templates` | Create a draft template |
+| `POST` | `/apps/runbook/api/v1/templates/import` | Import a template export as a new draft |
 | `GET` | `/apps/runbook/api/v1/templates/{id}` | Template with sections and steps |
 | `PATCH` | `/apps/runbook/api/v1/templates/{id}` | Update template metadata |
 | `DELETE` | `/apps/runbook/api/v1/templates/{id}` | Delete a template |
 | `POST` | `/apps/runbook/api/v1/templates/{id}/publish` | Publish a draft |
 | `POST` | `/apps/runbook/api/v1/templates/{id}/archive` | Archive a template |
+| `POST` | `/apps/runbook/api/v1/templates/{id}/unarchive` | Restore an archived template |
+| `POST` | `/apps/runbook/api/v1/templates/{id}/duplicate` | Duplicate a template into a new draft |
+| `GET` | `/apps/runbook/api/v1/templates/{id}/export` | Export a template as portable JSON |
 | `POST` | `/apps/runbook/api/v1/templates/{id}/sections` | Add a section |
 | `PATCH` | `/apps/runbook/api/v1/sections/{id}` | Update a section |
 | `DELETE` | `/apps/runbook/api/v1/sections/{id}` | Delete a section |
@@ -362,11 +407,15 @@ HTTP status code (`400`, `403`, `404`, `409`).
 | `POST` | `/apps/runbook/api/v1/runs/{id}/complete` | Complete a run |
 | `POST` | `/apps/runbook/api/v1/runs/{id}/cancel` | Cancel a run |
 | `POST` | `/apps/runbook/api/v1/runs/{id}/reopen` | Reopen a completed run |
+| `DELETE` | `/apps/runbook/api/v1/runs/{id}` | Delete a run and its data (owner or administrator) |
 | `POST` | `/apps/runbook/api/v1/run-steps/{id}/start` | Start a pending step |
 | `PATCH` | `/apps/runbook/api/v1/run-steps/{id}` | Store a step response and/or update its assignment |
 | `POST` | `/apps/runbook/api/v1/run-steps/{id}/complete` | Complete a step |
 | `POST` | `/apps/runbook/api/v1/run-steps/{id}/skip` | Skip a step with a reason |
 | `POST` | `/apps/runbook/api/v1/run-steps/{id}/reopen` | Reopen a completed or skipped step |
+| `POST` | `/apps/runbook/api/v1/run-steps/{id}/return` | Return a step for correction with a reason |
+| `PATCH` | `/apps/runbook/api/v1/run-sections/{id}` | Update a run section's notes (owner, active run) |
+| `POST` | `/apps/runbook/api/v1/run-sections/{id}/return` | Return a whole section for correction with a reason |
 | `GET` | `/apps/runbook/api/v1/runs/{id}/acl` | Read the run participant list (owner only) |
 | `PUT` | `/apps/runbook/api/v1/runs/{id}/acl` | Replace the run participant list atomically (owner only) |
 | `GET` | `/apps/runbook/api/v1/my-work` | Assigned work of the current user (`filter`) |
@@ -378,7 +427,7 @@ HTTP status code (`400`, `403`, `404`, `409`).
 | `GET` | `/apps/runbook/api/v1/runs/{id}/attachments` | List evidence metadata of a run |
 | `POST` | `/apps/runbook/api/v1/run-steps/{id}/attachments` | Upload evidence (`multipart/form-data`, field `file`) |
 | `GET` | `/apps/runbook/api/v1/attachments/{id}` | Download evidence |
-| `DELETE` | `/apps/runbook/api/v1/attachments/{id}` | Delete evidence (uploader or owner) |
+| `DELETE` | `/apps/runbook/api/v1/attachments/{id}` | Delete evidence (uploader or owner; not the last file of a completed required FILE step) |
 | `GET` | `/apps/runbook/api/v1/runs/{id}/activity` | Activity history (`limit`), newest first |
 | `GET` | `/apps/runbook/api/v1/admin/settings` | Read administration settings (administrators only) |
 | `PUT` | `/apps/runbook/api/v1/admin/settings` | Save administration settings (administrators only) |
@@ -421,6 +470,15 @@ rejected. Returned entries are normalized.
   storage keys, physical paths or secrets.
 - User content (titles, descriptions, comments, responses) is stored and
   returned as plain text; it is never rendered as HTML.
+- Imported template documents are treated as untrusted: only the documented
+  schemaVersion 1 fields are read (unknown fields are ignored), references,
+  operators, values, conditions and assignees are validated through the same
+  authoring rules, and the transaction is rolled back on any failure. Imports
+  never transfer database ids, UUIDs, owner, status, ACL entries or run/file
+  data, and the new template is owned by the importing user.
+- The import size limit (canonical 2 MB) is enforced server-side; the browser's
+  32 MB source-file guard is only a local memory cap and is never an
+  authorization or acceptance decision.
 - The notification ledger and evidence storage never expose internal storage
   keys or paths through the API.
 
@@ -429,6 +487,8 @@ rejected. Returned entries are normalized.
 | Resource | Read | Mutate |
 | -------- | ---- | ------ |
 | Templates | Owner and any ACL role (VIEWER, EXECUTOR, EDITOR, OWNER) | `EDITOR`/`OWNER` edit content; only `OWNER` publishes, archives, deletes and manages the template ACL; creation is governed by the administration policy |
+| Template export | Owner and any ACL role that grants view | n/a (read-only) |
+| Template import | Any authenticated user permitted by the template-creation policy (the policy applies to import exactly as to creating a template) | Creates a new `DRAFT` owned by the importer; never modifies an existing template |
 | Template sections and steps | Anyone who can view the template | `EDITOR`/`OWNER` |
 | Template ACL | `OWNER` only | `OWNER` only |
 | Runs | Owner, run ACL participants/viewers and step assignees | Owner completes/cancels/reopens and manages run participants; step assignees execute their steps |
@@ -445,7 +505,9 @@ rejected. Returned entries are normalized.
 
 Archived templates are read-only. Completed and cancelled runs are read-only for
 steps, comments and attachments. Global feature toggles (comments, step/run
-reopening, notifications, Dashboard, search) are enforced server-side.
+reopening, notifications, Dashboard, search) are enforced server-side. Template
+unarchive and duplicate are available to the template owner or a Nextcloud
+administrator; they are not ACL roles and are not shown in the matrix above.
 
 ## Visibility rules
 
@@ -526,13 +588,20 @@ Responses are always validated server-side:
 | `SELECT`       | one of the configured options |
 | `DATE`         | ISO date (`YYYY-MM-DD`) |
 | `USER`         | existing Nextcloud user UID |
-| `FILE`         | not supported yet; a clear error is returned |
+| `FILE`         | no response value: a non-null value is rejected. A `FILE` step is resolved through evidence attachments |
 
 Required steps must have a valid response before completion and may only be
 skipped with a non-empty reason. A skipped required step counts as resolved for
 run completion but stays visibly marked as skipped. Run progress is calculated
 from the steps (`PENDING` and `IN_PROGRESS` count as pending); it is never
 persisted.
+
+`FILE` steps never store a response value, file contents or storage paths. A
+**required** `FILE` step can only be completed once at least one persisted
+evidence attachment belongs to that exact step and run (verified server-side), so
+a failed or in-progress upload never counts; an optional `FILE` step may be
+completed without evidence. The last attachment of a completed required `FILE`
+step cannot be deleted until it is replaced (see "Evidence attachments").
 
 ## Progress
 
@@ -610,17 +679,28 @@ are never exposed through the API.
 
 - Uploading requires permission to execute the step (owner or assigned user or
   group) and an `ACTIVE` run.
-- Uploads are limited to 10 MiB. The MIME type is detected from the file content
-  (client-provided types are ignored) against a conservative allowlist
-  (`image/png`, `image/jpeg`, `image/gif`, `image/webp`, `application/pdf`,
-  `text/plain`, `text/csv`, `application/json`, `application/zip`).
+- Uploads use the configurable evidence size limit (default 25 MiB,
+  `AdminSettings::DEFAULT_MAX_ATTACHMENT_SIZE = 26214400` bytes). The MIME type
+  is detected from the file content (client-provided types are ignored) against a
+  conservative allowlist (`image/png`, `image/jpeg`, `image/gif`, `image/webp`,
+  `application/pdf`, `text/plain`, `text/csv`, `application/json`,
+  `application/zip`).
 - A `sha256` checksum, size, sanitized filename and uploader are stored. File
   names may not contain path separators, `..` or control characters and are
   limited to 255 characters.
 - The uploader and the run owner may delete evidence while the run is active.
   Deleting metadata removes the stored file; a failed metadata write never leaves
-  an orphan file behind.
+  an orphan file behind. The last attachment of a **completed required `FILE`
+  step** cannot be deleted: upload a replacement first, then delete the old file.
 - Downloads require read access to the run.
+- `FILE` steps are resolved entirely through evidence; they never store a
+  response value, file contents or storage paths. A **required** `FILE` step can
+  only be completed once at least one persisted attachment belongs to that exact
+  step and run (verified server-side from stored metadata, so an in-progress or
+  failed upload never counts). Completing it without evidence is rejected with a
+  clear error; an optional `FILE` step may be completed without evidence. After a
+  successful upload the step's evidence list refreshes automatically and
+  completion becomes available without a manual reload.
 
 ## Activity history
 
@@ -801,6 +881,48 @@ Notes:
 - The main application reads a small read-only feature endpoint
   (`GET /apps/runbook/api/v1/features`) to reflect globally disabled features in
   its UI. It is never used for authorization.
+
+## User interface architecture
+
+The visual system and UX architecture for the execution view and template
+editor is documented in [`docs/ux-architecture.md`](docs/ux-architecture.md).
+It defines the shared page shell, information hierarchy, flow-state pattern and
+copy rules, progress language, authoring rule summaries, responsive and
+accessibility behavior, and the responsibilities of issues #27–#33.
+
+Design tokens live in `src/styles/tokens.css` and layer on the Nextcloud theme
+variables (spacing, content widths, surfaces, state accents, focus and target
+sizes). Reusable pieces:
+
+- `src/components/FlowStatusBadge.vue` — state pill (label plus tone);
+- `src/components/SectionStatus.vue` — section state label and explanation lines;
+- `src/components/SectionNavigator.vue` — execution-page section navigator and
+  narrow-screen section picker;
+- `src/components/SectionOutline.vue` — template-editor section outline and
+  narrow-screen section selector;
+- `src/utils/runExecution.ts` — execution-page helpers: section progress,
+  display-only progress categories, default selection, deep-link resolution and
+  next actionable steps;
+- `src/utils/runNavigation.ts` — one-shot deep-link navigation state for the
+  execution page;
+- `src/utils/templateAuthoring.ts` — template-editor helpers: section outline,
+  focus/selection rules, condition draft validation and unsaved-draft
+  comparison;
+- `src/utils/editorDrafts.ts` — template-editor draft/discard state transitions
+  (scoped discard confirmations and step-draft save results);
+- `src/utils/navigationGuard.ts` — app-shell hash parsing and the shared
+  unsaved-changes decision;
+- `src/utils/historyStack.ts` — pure browser-history model (entries + index);
+- `src/utils/navigationController.ts` — request/confirm/cancel reducer for the
+  app-shell navigation guard;
+- `src/utils/navigationHistory.ts` — combines the guard and the history model
+  into the entry/index transitions the app shell performs;
+- `src/utils/sectionFlow.ts` — pure helpers for the section status explanation
+  and the authoring rule summary;
+- `src/utils/sectionReason.ts` — reason fragments rendered as separate lines.
+
+Flow state always comes from the backend (`state`, `blockedBy`, `reason[]`); the
+frontend only formats it and never derives flow decisions.
 
 ## Frontend quality checks
 
@@ -1053,56 +1175,329 @@ counted as pending actionable work, but they still block completion once their
 dependencies are satisfied. Detail, My Work, the overview and the Dashboard
 widget share this definition.
 
-## Template import and export (planned)
+## Template export
 
-Template import/export is intentionally **not implemented yet** and is deferred
-to a separate, focused change after the flow engine is stable. The design below
-is the recommended extension point; it reuses the existing authoring services
-rather than adding new persistence.
+### Endpoint
 
-- **Endpoints**
-  - `GET /api/v1/templates/{id}/export` — returns a portable JSON document for a
-    template the user can at least view.
-  - `POST /api/v1/templates/import` — creates a new `DRAFT` template owned by the
-    importing user.
-  - (optional) `POST /api/v1/templates/{id}/import` — replaces an editable
-    template's content; owner/editor only.
-- **Payload format** — a versioned envelope. Cross-references use **stable local
-  ids** assigned by the document, not database ids, because ids are not portable
-  across instances:
+`GET /api/v1/templates/{id}/export` returns a portable JSON document for a
+template the current user may **view** (owner, or any direct/group ACL role that
+grants view). Visible draft, published and archived templates are all
+exportable. Unauthenticated or unauthorized requests are rejected by the
+existing permission check (HTTP 403, reason `not_allowed`) without exposing any
+template content. Export is strictly read-only: it never writes, never bumps the
+template version, and never touches ACLs, runs or activity. The response body is
+the document itself (no wrapper).
 
-  ```json
-  {
-    "format": "runbook-template",
-    "schemaVersion": 1,
-    "template": { "title": "Deploy", "description": "..." },
-    "sections": [
-      { "ref": "s1", "title": "Start", "description": "", "notes": "",
-        "dependsOn": [], "conditions": [] },
-      { "ref": "s2", "title": "Production", "dependsOn": ["s1"],
-        "conditions": [{ "stepRef": "t1", "operator": "equals", "value": "prod" }] }
-    ],
-    "steps": [
-      { "ref": "t1", "sectionRef": "s1", "title": "Environment", "type": "SELECT",
-        "required": true, "position": 0, "config": { "options": ["dev", "prod"] },
-        "defaultAssignee": null, "dueOffset": null }
-    ]
-  }
-  ```
+### How users export
 
-- **Validation rules** — import must pass exactly the same server-side rules as
-  authoring (`lib/Service/TemplateService.php`): valid title/description/notes,
-  known section/step references, no self-dependency, no dependency cycles,
-  conditions referencing an existing step of a **previous** section, an operator
-  valid for the step type, a value valid for the step type, no duplicate or
-  contradictory conditions in a gate, and no duplicate condition gate across
-  sections. Unknown `schemaVersion` values are rejected. Server-managed fields
-  (`id`, `uuid`, `owner`, timestamps, `status`, ACL entries) are ignored on
-  import and regenerated. Import always lands as `DRAFT`, so publishing and ACL
-  assignment stay explicit owner actions.
-- **Why deferred** — the flow engine's snapshot isolation, validation and reason
-  metadata must be frozen first; import/export then only serialises and
-  re-validates the same model, which keeps the change low-risk.
+In the Templates or Archived list, use **Export** on a template. The browser
+downloads `<slug>.json`, where the slug is the title lowercased with accents
+removed and every non-alphanumeric run collapsed to a single dash (an empty
+result falls back to `runbook-template.json`). Export does not navigate away;
+the action shows an in-progress state, prevents duplicate clicks and reports
+failures inline. The temporary object URL is always revoked.
+
+### Schema (`schemaVersion` 1)
+
+```json
+{
+  "format": "runbook-template",
+  "schemaVersion": 1,
+  "template": { "title": "Deploy", "description": "Release procedure" },
+  "sections": [
+    { "ref": "s1", "title": "Start", "description": "", "notes": "kickoff",
+      "dependsOn": [], "conditions": [] },
+    { "ref": "s2", "title": "Production", "description": "", "notes": "",
+      "dependsOn": ["s1"],
+      "conditions": [
+        { "stepRef": "t1", "operator": "equals", "value": "prod" },
+        { "stepRef": "t2", "operator": "greater_than", "value": 5 }
+      ] }
+  ],
+  "steps": [
+    { "ref": "t1", "sectionRef": "s1", "title": "Environment", "description": "",
+      "type": "SELECT", "required": true, "position": 0,
+      "config": { "options": ["dev", "prod"] },
+      "defaultAssignee": "principals/users/alice", "dueOffset": "60" }
+  ]
+}
+```
+
+### Field meanings
+
+- `template.title` / `template.description` — the template metadata.
+- `sections[].ref` — stable, document-local reference (`s1`, `s2`, …) assigned in
+  section order; never a database id.
+- `sections[].title` / `description` / `notes` — section text.
+- `sections[].dependsOn` — prerequisite section refs; sorted by ref.
+- `sections[].conditions` — the section gate: `{ stepRef, operator, value? }`
+  entries combined with **AND**. `value` is present for typed operators and keeps
+  its type (string, number or boolean). Alternative paths are separate
+  conditional sections, so there is no OR operator.
+- `steps[].ref` (`t1`, …), `sectionRef`, `title`, `description`, `type`
+  (`CHECK`/`CONFIRMATION`/`TEXT`/`NUMBER`/`SELECT`/`DATE`/`USER`/`FILE`),
+  `required`, `position`, `defaultAssignee`, `dueOffset`.
+- `steps[].config` — the **complete persisted configuration object**, including
+  every authored key for every step type: `SELECT` and `NUMBER` commonly contain
+  `options` / `unit`, but any additional keys are exported too, with their values
+  and array order preserved. An empty configuration serialises as `{}` (never
+  `[]`), and a `NUMBER` step with no stored unit has no `unit` key (it is not
+  invented as `""`).
+
+Ordering is deterministic (sections and steps by position then id; dependencies
+by ref), so repeated exports of unchanged data are equivalent. Zero-step
+sections are included.
+
+The document includes all user-authored content (titles, descriptions, section
+notes and step instructions, and step configuration). Downloaded files therefore
+contain the template's text and settings; handle and share them accordingly.
+
+### Deliberately excluded
+
+Database ids, UUIDs, owner, status, timestamps, ACL entries, runs and run
+snapshots, responses, participants/assignments, activity, comments, evidence and
+files, notifications and storage paths. The entity `toArray()` output is never
+serialised wholesale.
+
+### Portability caveat
+
+`defaultAssignee` is a Nextcloud principal identifier (for example
+`principals/users/alice`). It is **instance-specific**: on a different Nextcloud
+the user or group may not exist. Import verifies every non-null assignee against
+the local instance and rejects the whole file if one cannot be resolved (set it
+to `null` in the JSON and retry).
+
+## Template import
+
+### Endpoint
+
+`POST /api/v1/templates/import` accepts the export document itself (no wrapper)
+as a JSON request body and creates **one new DRAFT template owned by the
+requesting user**, returning `{ "template": { … } }` with HTTP 201. The static
+`/templates/import` route is registered before `/templates/{id}`.
+
+The importer runs the same creation policy as `POST /api/v1/templates`
+(`TemplateService::createTemplate`), server-side: a user who may only view or
+edit somebody else's template gains no import right when template creation is
+disabled. Import never applies imported database ids, UUIDs, owner, status,
+timestamps or ACL entries, and never copies runs, responses, activity, comments,
+attachments or notifications. No existing template or run is modified.
+
+The whole write sequence runs inside the existing `TransactionRunner`: a failure
+at any stage rolls back so no template, section, step or flow-rule row is left
+behind. Flow rules are applied in a second pass (template and sections first,
+then steps, then dependencies/conditions), so document-local `s…`/`t…` refs are
+mapped to new database ids through the normal authoring validation — there is no
+second flow engine.
+
+### How users import
+
+In the Templates area (including the empty state) a user who may create templates
+sees **Import template**. Choosing a local `.json` file parses it as UTF-8 JSON
+and shows a confirmation summary (title, description, section and step counts,
+file name) before anything is created, including a reminder that the result is a
+new draft owned by the current user. Confirming creates the draft, refreshes the
+list and opens it in the editor; the current template is never overwritten. The
+action shows progress, blocks double submission, translates validation and
+permission errors, and lets the same file be chosen again after a failure. The
+selected file is read locally and only sent in the import request — it is never
+uploaded or stored elsewhere.
+
+While a request is in flight the confirmation dialog cannot be dismissed:
+Cancel is disabled and Escape, the backdrop and the dialog close control are
+suppressed, so the user never sees a "cancelled" import that still creates a
+template. If the template is created but the list refresh or opening it in the
+editor fails, the import is **not** reported as failed: the created draft is
+preserved and offered with an "Open imported template" action, so retrying cannot
+create a duplicate.
+
+### Validation, reason codes and limits
+
+The document must declare `format: "runbook-template"` and `schemaVersion: 1`.
+Unsupported versions are rejected (never an uncaught 500). Every reference is
+checked before writing: duplicate refs, a missing `sectionRef`/`stepRef`/
+`dependsOn` ref, an unknown assignee, invalid condition operators/values,
+dependency cycles and contradictory/duplicate conditions all abort the import.
+A JSON `config` object and an empty array are equivalent (Nextcloud decodes a
+JSON request body; `{}` and `[]` both arrive as an empty PHP array).
+
+There are **two distinct limits**; only the second decides acceptance.
+
+1. **Browser source-file safety cap: 32,000,000 bytes.** Purely a memory guard,
+   applied to `File.size` before `file.text()`. It is not the import rule. Exports
+   are pretty-printed (`formatTemplateExport`), so the downloaded file is larger
+   than the compact body sent back on import; a maximal valid document (2,000,000
+   canonical bytes) expands by roughly 10x for token-dense structures, so a
+   realistic maximal export fits well within the cap. Pathologically deep
+   configuration nesting can expand super-linearly when pretty-printed, so the cap
+   is a guard, not a promise that every canonical-valid document is readable.
+2. **Server canonical-document cap: 2,000,000 bytes — authoritative.** The server
+   measures the canonical compact UTF-8 encoding of the decoded document
+   (`JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES`) and accepts or rejects on
+   that alone. This is deliberately not a wire-byte limit: the Nextcloud
+   `IRequest` API exposes no raw request body (`getParams()`/`getHeader()` only),
+   so the actual body length and any client-declared `Content-Length` are neither
+   available nor trusted, and the same rule applies to HTTP requests and direct
+   service calls. The raw request size is bounded separately by PHP/Nextcloud
+   request-size limits.
+
+Because JavaScript and PHP serialise some values differently, the browser
+**never** decides document size. Examples: JS `JSON.stringify` writes `1e+21`
+where PHP writes `1.0e+21`, `0.000001` where PHP writes `1.0e-6`, and keeps
+U+2028 literal where PHP escapes it to `\u2028`. A JavaScript byte estimate can
+therefore be larger *or* smaller than the server's canonical size, so the UI must
+not reject a document on that basis; the server's localized
+`import_document_too_large` error is shown instead, the selected document is kept
+for an explicit retry, and no partial template is ever created. Accented
+Portuguese is counted as real UTF-8 (never default `json_encode()`, which escapes
+`é` to `\u00e9` and over-counts), so valid accented documents are not rejected.
+
+| Reason | Meaning |
+| --- | --- |
+| `invalid_import_format` | `format` is not `runbook-template`. |
+| `unsupported_import_schema_version` | `schemaVersion` is not `1`. |
+| `invalid_import_document` | Missing/incorrectly typed fields. |
+| `duplicate_import_reference` | A `s…`/`t…` ref is used twice. |
+| `invalid_import_reference` | A `sectionRef`, `stepRef` or `dependsOn` ref is unknown. |
+| `invalid_import_assignee` | A non-null `defaultAssignee` does not exist locally. |
+| `import_document_too_large` | Canonical compact UTF-8 encoding exceeds 2,000,000 bytes (server decision). |
+| `import_too_many_sections` | More than 500 sections. |
+| `import_too_many_steps` | More than 5,000 steps. |
+| `import_too_many_dependencies` | More than 5,000 dependency edges. |
+| `import_too_many_conditions` | More than 5,000 conditions. |
+| `template_creation_forbidden` | Creation policy denies the user. |
+
+Flow errors reuse the authoring reasons (`invalid_condition_operator`,
+`invalid_condition_value`, `section_dependency_cycle`, …).
+
+### Validation and security guarantees (#32)
+
+- **Untrusted input is a 400, never a 500.** Documents that cannot be
+  JSON-encoded for measurement — non-finite floats (the `INF` that
+  `json_decode('1e400')` produces), malformed UTF-8, or nesting deeper than
+  PHP's encoder limit — are reported as `invalid_import_document`. The
+  collection limits are checked before the 2 MB canonical encoding is built.
+- **Unknown fields are ignored, never applied.** Only `format`, `schemaVersion`,
+  `template`, `sections` and `steps` (and the documented child fields) are read.
+  Injected `id`, `uuid`, `owner`, `status`, `acl`, `permissions`, `runs`,
+  `templateId` or `sectionId` fields have no effect; the new template always gets
+  a fresh UUID, version 1, DRAFT status and the acting user as owner, and no ACL
+  rows are created.
+- **Atomic.** The whole write runs in one `TransactionRunner` transaction.
+  Failures at any stage (metadata, section, step, assignee or flow-rule creation)
+  roll back to no template, section, step or ACL rows. Template authoring does
+  not emit activity or notification side effects, so nothing can escape the
+  transaction.
+- **Authorization unchanged.** Import runs the existing creation policy; export
+  runs the existing view permission. Administrators get no implicit access:
+  a Nextcloud admin who is neither owner nor on the ACL cannot export.
+- **Data minimization.** Exports contain only authoring fields (titles,
+  descriptions, notes, step type/required/position/configuration, assignees, due
+  offsets and document-local references). No database ids, UUIDs, owner, status,
+  ACLs, runs/responses, comments, evidence or file storage paths, activity or
+  notifications are serialised.
+- **Reference integrity.** Duplicate, missing, self-referential and cyclic
+  references, invalid per-type operators/values, and duplicate or contradictory
+  conditions are rejected before any row persists.
+
+Residual limits (not fully eliminable with the installed APIs):
+
+- The canonical 2 MB limit is measured on the decoded document, not the raw
+  request body (`IRequest` exposes no raw body). A whitespace-padded body can be
+  larger on the wire; the raw request size is bounded by PHP/Nextcloud
+  `post_max_size`/request limits, which are not verified here.
+- PHP's JSON decoder depth (default 512) applies while the framework parses the
+  request body, before this service runs; requests exceeding it are handled by
+  the framework layer and are not covered by these tests.
+- No real Nextcloud/browser integration test exists in this repository (#33);
+  the guarantees above are exercised through the public OCP interfaces, stubs and
+  test doubles.
+
+### Ordering rule
+
+Section-array order **is** section order (sections are created in document
+order, so their stored positions are contiguous). Within a section, steps are
+ordered by their exported `position`, with document order as the stable
+tie-breaker, and re-created with contiguous positions through the authoring
+service. Zero-step sections are preserved, as are all eight step types,
+instructions, required flags, full configuration objects (including additional
+authored keys), due offsets and resolvable default assignees.
+
+### Writing large templates by hand
+
+Import makes a manually authored JSON file practical for large templates. Write
+a single JSON object with the envelope keys `format`, `schemaVersion`,
+`template`, `sections` and `steps`.
+
+1. **Envelope** — `"format": "runbook-template"`, `"schemaVersion": 1`,
+   `"template": { "title": "…", "description": "…" }`.
+2. **Sections** — one entry per section in the order they should appear. `ref`
+   is a document-local id you invent (`s1`, `s2`, …). Keep `sections[].ref`
+   unique. `description`/`notes` are optional. A section with no steps is valid.
+3. **Steps** — one flat list; each step names its section with `sectionRef`.
+   `ref` is unique (`t1`, `t2`, …), `position` is the order inside its section
+   (ties fall back to document order), and `type` is one of `CHECK`,
+   `CONFIRMATION`, `TEXT`, `NUMBER`, `SELECT`, `DATE`, `USER`, `FILE`.
+4. **Dependencies** — `sections[].dependsOn` is a list of other **section**
+   refs; the engine rejects self-dependencies and cycles.
+5. **Conditions (all must match)** — `sections[].conditions` is a list of
+   `{ "stepRef": "t…", "operator": "…", "value": … }` gates combined with **AND**.
+   The referenced step must belong to an earlier section. `value` keeps its JSON
+   type (string, number, boolean) and is required for typed operators.
+6. **Alternative paths** — an OR is expressed as two separate conditional
+   sections with mutually exclusive conditions on the same controlling step
+   (for example `equals "prod"` and `equals "dev"`); two sections may not share
+   an identical condition.
+7. **Configuration** — `steps[].config` is an object. `SELECT` needs
+   `"options": ["a", "b"]`; `NUMBER` may have `"unit"`. Any additional authored
+   keys are preserved.
+8. **Assignees and due offsets** — `defaultAssignee` is a Nextcloud principal
+   (`principals/users/alice` / `principals/groups/team`) or `null`;
+   `dueOffset` is a non-negative number of minutes as a string, or `null`.
+
+Common validation failures: a `sectionRef`/`stepRef`/`dependsOn` typo
+(`invalid_import_reference`), a reused ref (`duplicate_import_reference`), a
+condition on the same or a later section, a cycle, an operator that does not fit
+the step type, or an assignee that does not exist locally (set it to `null`).
+
+Worked example (two parallel branches, a zero-step section, AND conditions and a
+typed number comparison):
+
+```json
+{
+  "format": "runbook-template",
+  "schemaVersion": 1,
+  "template": { "title": "Deploy", "description": "Release procedure" },
+  "sections": [
+    { "ref": "s1", "title": "Config", "description": "", "notes": "",
+      "dependsOn": [], "conditions": [] },
+    { "ref": "s2", "title": "Manual notes", "description": "", "notes": "",
+      "dependsOn": [], "conditions": [] },
+    { "ref": "s3", "title": "Branch prod", "description": "", "notes": "",
+      "dependsOn": ["s1"],
+      "conditions": [ { "stepRef": "t1", "operator": "equals", "value": "prod" } ] },
+    { "ref": "s4", "title": "Branch dev", "description": "", "notes": "",
+      "dependsOn": ["s1"],
+      "conditions": [ { "stepRef": "t1", "operator": "equals", "value": "dev" } ] },
+    { "ref": "s5", "title": "Final", "description": "", "notes": "",
+      "dependsOn": ["s1", "s3"],
+      "conditions": [
+        { "stepRef": "t1", "operator": "equals", "value": "prod" },
+        { "stepRef": "t2", "operator": "greater_than", "value": 5 }
+      ] }
+  ],
+  "steps": [
+    { "ref": "t1", "sectionRef": "s1", "title": "Environment", "description": "",
+      "type": "SELECT", "required": true, "position": 0,
+      "config": { "options": ["dev", "prod"] },
+      "defaultAssignee": "principals/users/alice", "dueOffset": null },
+    { "ref": "t2", "sectionRef": "s1", "title": "Amount", "description": "",
+      "type": "NUMBER", "required": false, "position": 1,
+      "config": { "unit": "kg", "decimals": 2 },
+      "defaultAssignee": null, "dueOffset": "60" }
+  ]
+}
+```
 
 ## Known limitations
 
@@ -1120,8 +1515,16 @@ rather than adding new persistence.
 - Comments are plain text (no rich formatting); mentions notify once and do not
   send follow-up notifications.
 - The activity history is not surfaced through unified search.
-- `FILE` step responses remain unsupported (a clear error is returned); evidence
-  is stored as step attachments instead of a step response value.
+- `FILE` step responses remain unsupported (non-null response values are
+  rejected); evidence is stored as step attachments instead. A required `FILE`
+  step can only be completed with at least one persisted attachment, and the last
+  attachment of a completed required `FILE` step cannot be deleted until it is
+  replaced.
+- Template import limits the canonical encoding of the decoded document to 2 MB;
+  the raw request body is not measured (Nextcloud/PHP request limits apply), and
+  the 32 MB browser source-file cap is only a local memory guard.
+- Template import/export has not been exercised on a real Nextcloud instance;
+  see [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md).
 - The template and run detail endpoints load steps per section (no batching yet).
 - Reordering and deleting update rows sequentially without an explicit database
   transaction.
@@ -1136,11 +1539,17 @@ rather than adding new persistence.
 
 ## Release
 
-- **Version:** 0.3.0 (`appinfo/info.xml`, `package.json`).
+- **Version:** 0.4.0 release candidate (`appinfo/info.xml`, `package.json`).
 - **Nextcloud:** 33.
 - **PHP:** 8.2 – 8.5.
 - **Databases:** MySQL/MariaDB, PostgreSQL and SQLite.
 - **License:** AGPL-3.0-or-later.
+
+The 0.4.0 UX and template import/export work (#26–#33) is packaged as a **release
+candidate for manual acceptance**. It is not a published or production-verified
+release: the archives have not been uploaded or deployed, and the real-Nextcloud
+acceptance run is still outstanding. The v0.3.0 material below is retained as
+historical release information.
 
 ### v0.3.0
 
@@ -1198,6 +1607,7 @@ database schema change and no new migration were introduced.
 npm ci
 npm run lint
 npm run typecheck
+npm run test:frontend
 npm run build
 
 composer install --prefer-dist --no-interaction
@@ -1209,6 +1619,7 @@ composer test:migration
 composer test:security
 composer validate:xml
 composer validate:json
+composer package:check
 ```
 
 `npm run build` emits the compiled assets (`js/runbook-main.mjs`,
@@ -1222,10 +1633,20 @@ npm ci && npm run build
 php build/create-package.php
 ```
 
-`build/create-package.php` writes a staging tree with runtime files only and
-creates `runbook-0.3.0.tar.gz` (archive root `runbook/`). It validates the
-staging tree with `build/validate-package.php` before archiving. Validate an
-existing tree at any time with `composer package:check`.
+`build/create-package.php` reads the version from `appinfo/info.xml`, writes a
+staging tree with runtime files only and creates `runbook-<version>.tar.gz`
+(archive root `runbook/`) — for example `runbook-0.4.0.tar.gz` for the current
+0.4.0 release candidate. Before archiving it validates the staging tree with
+`build/validate-package.php --package=<staging-directory>`, which also checks
+that every relative link in the packaged `README.md` resolves inside the tree
+(and does not escape it through `..` or an absolute path), including the `docs/`
+files shipped with it.
+
+`composer package:check` runs `build/validate-package.php` in **repository
+mode**: it validates release *readiness* (required files, generated assets,
+translation parity) against the working tree and never inspects a package. The
+forbidden-file and packaged-link checks run only in package mode
+(`--package=<staging-directory>`), which `build/create-package.php` performs.
 
 The package excludes `node_modules/`, `vendor/`, `tests/`, `.github/`, `.git/`,
 `build/`, the TypeScript/Vue sources, lock files, source maps, caches, logs,
@@ -1238,7 +1659,7 @@ Live verification was completed against a disposable Docker environment:
 - image `nextcloud:33-apache` (Nextcloud 33.0.9, PHP 8.4, SQLite);
 - the packaged app (not the development tree) was installed into
   `custom_apps/runbook`;
-- enabling the app applied all seven migrations and created all thirteen tables;
+- enabling the app applied all migrations and created all thirteen tables;
 - the main page and the administration settings page loaded and their compiled
   assets were served (HTTP 200);
 - the app appeared in the Nextcloud navigation;
@@ -1258,6 +1679,12 @@ Limitation: only SQLite was exercised live in this environment; MySQL and
 PostgreSQL are declared and covered by the portable schema/migration tests but
 were not run against live database servers here.
 
+The 0.3.0 verification above predates the milestone 0.4.0 work (#26–#33). The
+0.4.0 import/export and UX integration is **code-complete but not yet verified on
+a real instance**; run [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md)
+against the packaged build. No automated check in this repository claims that
+manual acceptance passed.
+
 ### Retention
 
 The `retention_days` administration setting is stored and validated only.
@@ -1269,7 +1696,7 @@ enforcement belongs to a future release.
 `.github/workflows/ci.yml` runs four deterministic jobs:
 
 - **Frontend (Node 22):** `npm ci`, `npm run lint`, `npm run typecheck`,
-  `npm run build`.
+  `npm run test:frontend`, `npm run build`.
 - **PHP (8.2, 8.3, 8.4, 8.5):** `composer install --prefer-dist`, PHP syntax
   lint, coding style, PHPStan level 8 and the full PHPUnit suite.
 - **Migration and security tests:** `composer validate`, XML validation, JSON

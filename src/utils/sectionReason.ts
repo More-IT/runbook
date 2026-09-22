@@ -53,11 +53,11 @@ export function sectionStateLabel(t: Translate, state: string): string {
 export function reasonFragment(t: Translate, reason: SectionReason): string {
 	switch (reason.type) {
 		case 'condition_false':
-			return t('runbook', 'The condition on “{step}” is not satisfied', { step: reason.title }, { escape: false, sanitize: false })
+			return t('runbook', 'The condition on “{step}” was not satisfied', { step: reason.title }, { escape: false, sanitize: false })
 		case 'condition_pending':
-			return t('runbook', 'Waiting for “{step}”', { step: reason.title }, { escape: false, sanitize: false })
+			return t('runbook', 'Waiting for an answer to “{step}”', { step: reason.title }, { escape: false, sanitize: false })
 		case 'dependency':
-			return t('runbook', 'Waiting for section “{section}”', { section: reason.title }, { escape: false, sanitize: false })
+			return t('runbook', 'Waiting for “{section}” to be completed', { section: reason.title }, { escape: false, sanitize: false })
 		default:
 			return reason.title
 	}

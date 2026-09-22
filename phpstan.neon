@@ -4,6 +4,7 @@ parameters:
         - lib
         - tests
     scanFiles:
+        - build/package-links.php
         - build/stubs/doctrine-dbal.php
         - build/stubs/doctrine-dbal-platform.php
         - build/stubs/doctrine-dbal-schema.php

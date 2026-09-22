@@ -10,10 +10,12 @@ import { translate as t } from '@nextcloud/l10n'
 import { computed, ref, watch } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import NcCheckboxRadioSwitch from '@nextcloud/vue/components/NcCheckboxRadioSwitch'
+import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
 import NcSelect from '@nextcloud/vue/components/NcSelect'
 import NcTextArea from '@nextcloud/vue/components/NcTextArea'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { STEP_TYPES } from '../models/template.ts'
+import { isStepDraftDirty } from '../utils/editorDrafts.ts'
 
 interface TypeOption {
 	id: StepType
@@ -22,7 +24,11 @@ interface TypeOption {
 
 const props = defineProps<{
 	step: TemplateStep
+	index?: number
 	busy?: boolean
+	canEdit?: boolean
+	editing?: boolean
+	error?: string | null
 	canMoveUp: boolean
 	canMoveDown: boolean
 }>()
@@ -32,6 +38,9 @@ const emit = defineEmits<{
 	delete: []
 	moveUp: []
 	moveDown: []
+	edit: []
+	cancel: []
+	'update:dirty': [dirty: boolean]
 }>()
 
 /**
@@ -62,8 +71,6 @@ function typeLabel(type: StepType): string {
 
 const typeOptions: TypeOption[] = STEP_TYPES.map((type) => ({ id: type, label: typeLabel(type) }))
 
-const expanded = ref(false)
-const editing = ref(false)
 const title = ref(props.step.title)
 const description = ref(props.step.description)
 const type = ref<StepType>(props.step.type)
@@ -95,42 +102,9 @@ const unitDisplay = computed<string>(() => {
 })
 
 /**
- * Reset the local form state from the current step value.
+ * Build the step payload from the local form state.
  */
-function reset(): void {
-	title.value = props.step.title
-	description.value = props.step.description
-	type.value = props.step.type
-	required.value = props.step.required
-	defaultAssignee.value = props.step.defaultAssignee ?? ''
-	dueOffset.value = props.step.dueOffset ?? ''
-	options.value = [...(props.step.config.options ?? [])]
-	unit.value = typeof props.step.config.unit === 'string' ? props.step.config.unit : ''
-	editing.value = false
-}
-
-watch(() => props.step, reset, { deep: true })
-
-/**
- *
- */
-function addOption(): void {
-	options.value.push('')
-}
-
-/**
- * Remove a selection option.
- *
- * @param index Index of the option to remove.
- */
-function removeOption(index: number): void {
-	options.value.splice(index, 1)
-}
-
-/**
- * Build and emit the step payload from the local form state.
- */
-function submit(): void {
+function buildPayload(): StepPayload {
 	const payload: StepPayload = {
 		title: title.value,
 		description: description.value,
@@ -149,25 +123,68 @@ function submit(): void {
 		payload.config = { unit: unit.value.trim() }
 	}
 
-	emit('save', payload)
+	return payload
+}
+
+const dirty = computed<boolean>(() => props.editing === true && isStepDraftDirty(buildPayload(), props.step))
+
+watch(dirty, (value) => emit('update:dirty', value))
+
+/**
+ * Reset the local form state from the current step value.
+ */
+function reset(): void {
+	title.value = props.step.title
+	description.value = props.step.description
+	type.value = props.step.type
+	required.value = props.step.required
+	defaultAssignee.value = props.step.defaultAssignee ?? ''
+	dueOffset.value = props.step.dueOffset ?? ''
+	options.value = [...(props.step.config.options ?? [])]
+	unit.value = typeof props.step.config.unit === 'string' ? props.step.config.unit : ''
+}
+
+// A saved step (or opening/closing the form) always starts from the saved value,
+// so a discarded or cancelled draft can never leak back in.
+watch(() => props.step, reset, { deep: true })
+watch(() => props.editing, reset)
+reset()
+
+/**
+ * Add a selection option.
+ */
+function addOption(): void {
+	options.value.push('')
+}
+
+/**
+ * Remove a selection option.
+ *
+ * @param index Index of the option to remove.
+ */
+function removeOption(index: number): void {
+	options.value.splice(index, 1)
+}
+
+/**
+ * Emit the step payload; the parent closes the editor only after a successful save.
+ */
+function submit(): void {
+	emit('save', buildPayload())
 }
 </script>
 
 <template>
 	<div class="runbook-step">
 		<div class="runbook-step__summary">
-			<button
-				type="button"
-				class="runbook-step__toggle"
-				:aria-expanded="expanded"
-				@click="expanded = !expanded">
-				{{ expanded ? '▾' : '▸' }}
-			</button>
+			<span v-if="index !== undefined" class="runbook-step__index">{{ index }}</span>
 			<span class="runbook-step__title">{{ step.title }}</span>
 			<span class="runbook-step__type">{{ typeLabel(step.type) }}</span>
 			<span v-if="unitDisplay !== ''" class="runbook-step__unit">{{ unitDisplay }}</span>
 			<span v-if="step.required" class="runbook-step__required">{{ t('runbook', 'Required') }}</span>
-			<div class="runbook-step__actions">
+			<span v-if="step.defaultAssignee" class="runbook-step__assignee">{{ step.defaultAssignee }}</span>
+			<span v-if="step.dueOffset" class="runbook-step__due">{{ step.dueOffset }}</span>
+			<div v-if="canEdit && !editing" class="runbook-step__actions">
 				<NcButton
 					variant="tertiary"
 					:disabled="!canMoveUp || busy"
@@ -182,19 +199,19 @@ function submit(): void {
 					@click="emit('moveDown')">
 					↓
 				</NcButton>
-				<NcButton variant="tertiary" @click="editing = !editing">
-					{{ t('runbook', 'Edit') }}
-				</NcButton>
-				<NcButton variant="error" @click="emit('delete')">
-					{{ t('runbook', 'Delete') }}
+				<NcButton :disabled="busy" @click="emit('edit')">
+					{{ t('runbook', 'Edit step') }}
 				</NcButton>
 			</div>
 		</div>
 
+		<p v-if="!editing && step.description" class="runbook-step__description">
+			{{ step.description }}
+		</p>
+
 		<form v-if="editing" class="runbook-step__form" @submit.prevent="submit">
 			<NcTextField v-model="title" :label="t('runbook', 'Title')" />
 			<NcTextArea v-model="description" :label="t('runbook', 'Instructions')" />
-
 			<label class="runbook-step__label" for="runbook-step-type">{{ t('runbook', 'Step type') }}</label>
 			<NcSelect
 				v-model="selectedType"
@@ -202,11 +219,9 @@ function submit(): void {
 				:options="typeOptions"
 				label="label"
 				:clearable="false" />
-
 			<NcCheckboxRadioSwitch v-model="required" type="switch">
 				{{ t('runbook', 'Required') }}
 			</NcCheckboxRadioSwitch>
-
 			<NcTextField
 				v-model="defaultAssignee"
 				:label="t('runbook', 'Default assignee')"
@@ -216,12 +231,11 @@ function submit(): void {
 				type="number"
 				:label="t('runbook', 'Due offset')"
 				:helperText="t('runbook', 'Minutes after the run starts, for example 60 for one hour.')" />
-
 			<div v-if="type === 'SELECT'" class="runbook-step__options">
 				<span class="runbook-step__label">{{ t('runbook', 'Options') }}</span>
-				<div v-for="(option, index) in options" :key="index" class="runbook-step__option">
-					<NcTextField v-model="options[index]" :label="t('runbook', 'Option')" />
-					<NcButton variant="tertiary" @click="removeOption(index)">
+				<div v-for="(option, optionIndex) in options" :key="optionIndex" class="runbook-step__option">
+					<NcTextField v-model="options[optionIndex]" :label="t('runbook', 'Option')" />
+					<NcButton variant="tertiary" @click="removeOption(optionIndex)">
 						{{ t('runbook', 'Remove') }}
 					</NcButton>
 				</div>
@@ -229,15 +243,25 @@ function submit(): void {
 					{{ t('runbook', 'Add option') }}
 				</NcButton>
 			</div>
-
 			<NcTextField v-if="type === 'NUMBER'" v-model="unit" :label="t('runbook', 'Unit')" />
+
+			<NcNoteCard v-if="error" type="error">
+				{{ error }}
+			</NcNoteCard>
 
 			<div class="runbook-step__form-actions">
 				<NcButton type="submit" variant="primary" :disabled="busy">
 					{{ t('runbook', 'Save step') }}
 				</NcButton>
-				<NcButton @click="editing = false">
+				<NcButton :disabled="busy" @click="emit('cancel')">
 					{{ t('runbook', 'Cancel') }}
+				</NcButton>
+				<NcButton
+					variant="error"
+					class="runbook-step__delete"
+					:disabled="busy"
+					@click="emit('delete')">
+					{{ t('runbook', 'Delete') }}
 				</NcButton>
 			</div>
 		</form>
@@ -259,24 +283,30 @@ function submit(): void {
 	gap: 8px;
 }
 
-.runbook-step__toggle {
-	background: none;
-	border: none;
-	cursor: pointer;
-	font-size: 1em;
-	padding: 0 4px;
-}
-
 .runbook-step__title {
 	font-weight: bold;
 	flex: 1 1 auto;
 }
 
+.runbook-step__index {
+	min-width: 1.4em;
+	color: var(--runbook-text-muted);
+	font-variant-numeric: tabular-nums;
+}
+
 .runbook-step__type,
 .runbook-step__unit,
-.runbook-step__required {
+.runbook-step__required,
+.runbook-step__assignee,
+.runbook-step__due {
 	color: var(--color-text-maxcontrast, #555);
 	font-size: 0.85em;
+}
+
+.runbook-step__description {
+	margin: 8px 0 0;
+	color: var(--color-text-maxcontrast, #555);
+	overflow-wrap: anywhere;
 }
 
 .runbook-step__actions {
@@ -287,23 +317,37 @@ function submit(): void {
 .runbook-step__form {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
-	margin-top: 8px;
+	gap: var(--runbook-space-2);
+	margin-top: var(--runbook-space-2);
 }
 
 .runbook-step__label {
-	font-weight: bold;
+	font-weight: 600;
+}
+
+.runbook-step__options {
+	display: flex;
+	flex-direction: column;
+	gap: var(--runbook-space-1);
 }
 
 .runbook-step__option {
 	display: flex;
-	gap: 8px;
 	align-items: flex-end;
-	margin-bottom: 4px;
+	gap: var(--runbook-space-1);
+}
+
+.runbook-step__option > :first-child {
+	flex: 1 1 auto;
 }
 
 .runbook-step__form-actions {
 	display: flex;
-	gap: 8px;
+	flex-wrap: wrap;
+	gap: var(--runbook-space-2);
+}
+
+.runbook-step__delete {
+	margin-inline-start: auto;
 }
 </style>

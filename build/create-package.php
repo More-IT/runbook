@@ -30,7 +30,15 @@ $fixedMtime = 1704067200; // 2024-01-01T00:00:00Z for reproducible archives.
 
 // Runtime directories and files only.
 $includeDirs = ['appinfo', 'lib', 'templates', 'img', 'l10n', 'css', 'js'];
-$includeFiles = ['README.md', 'LICENSE', 'SECURITY.md'];
+$includeFiles = [
+	'README.md',
+	'LICENSE',
+	'SECURITY.md',
+	// Documentation linked from the packaged README; keep this list in sync with
+	// the relative links in README.md (validate-package.php checks them).
+	'docs/ux-architecture.md',
+	'docs/manual-acceptance-checklist.md',
+];
 
 removeDirectory($stagingParent);
 if (!mkdir($staging, 0777, true) && !is_dir($staging)) {
@@ -52,11 +60,17 @@ foreach ($includeFiles as $file) {
 		fwrite(STDERR, 'Missing required file: ' . $file . "\n");
 		exit(1);
 	}
-	if (!copy($source, $staging . '/' . $file)) {
+	$destination = $staging . '/' . $file;
+	$destinationDir = dirname($destination);
+	if (!is_dir($destinationDir) && !mkdir($destinationDir, 0777, true) && !is_dir($destinationDir)) {
+		fwrite(STDERR, 'Could not create directory: ' . $destinationDir . "\n");
+		exit(1);
+	}
+	if (!copy($source, $destination)) {
 		fwrite(STDERR, 'Could not copy file: ' . $file . "\n");
 		exit(1);
 	}
-	touch($staging . '/' . $file, $fixedMtime);
+	touch($destination, $fixedMtime);
 }
 
 // Validate the staging tree before archiving it.

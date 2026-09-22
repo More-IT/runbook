@@ -1,0 +1,48 @@
+/**
+ * SPDX-FileCopyrightText: 2026 More-IT
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Runbook design tokens (issue #26).
+ *
+ * A deliberately small token set layered on top of the Nextcloud theme
+ * variables. Everything falls back to the Nextcloud value, so light, dark and
+ * high-contrast themes keep working without hard-coded colours. Components
+ * should consume these tokens instead of inventing their own spacing/colours.
+ */
+
+:root {
+	/* Spacing rhythm (4px base). */
+	--runbook-space-1: 4px;
+	--runbook-space-2: 8px;
+	--runbook-space-3: 12px;
+	--runbook-space-4: 16px;
+	--runbook-space-5: 24px;
+	--runbook-space-6: 32px;
+
+	/* Content widths. Focused reading width for execution and authoring. */
+	--runbook-content-max: 60rem;
+	--runbook-content-narrow: 44rem;
+
+	/* Surfaces, borders and radii. */
+	--runbook-radius: var(--border-radius, 4px);
+	--runbook-radius-pill: 999px;
+	--runbook-surface: var(--color-main-background, #fff);
+	--runbook-surface-subtle: var(--color-background-dark, #ededed);
+	--runbook-surface-hover: var(--color-background-hover, #f5f5f5);
+	--runbook-border: var(--color-border, #ccc);
+	--runbook-border-strong: var(--color-border-dark, #999);
+
+	/* Text hierarchy helpers. */
+	--runbook-text-muted: var(--color-text-maxcontrast, #555);
+	--runbook-font-small: var(--font-size-small, 0.85em);
+
+	/* State accents (never the only signal; always paired with a text label). */
+	--runbook-accent-info: var(--color-primary-element, #0082c9);
+	--runbook-accent-success: var(--color-success, #46ba61);
+	--runbook-accent-warning: var(--color-warning, #e9a100);
+	--runbook-accent-danger: var(--color-error, #e9322d);
+
+	/* Focus and touch targets. */
+	--runbook-focus-ring: 2px solid var(--color-primary-element, #0082c9);
+	--runbook-target-min: 44px;
+}

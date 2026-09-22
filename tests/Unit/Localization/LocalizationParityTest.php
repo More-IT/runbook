@@ -43,7 +43,6 @@ class LocalizationParityTest extends TestCase {
 		'Confirm return',
 		'Step returned',
 		'Section returned',
-		'Waiting for: {sections}',
 		'Sections cannot depend on each other in a cycle.',
 		'A selected prerequisite section does not exist.',
 		'A section cannot depend on itself.',
@@ -58,10 +57,20 @@ class LocalizationParityTest extends TestCase {
 		'The return reason is too long.',
 		'This section has no resolved steps to return.',
 		'A section cannot use a condition on one of its own steps.',
-		'The condition on “{step}” is not satisfied',
-		'Reason:',
-		'Waiting for “{step}”',
-		'Waiting for section “{section}”',
+		'The condition on “{step}” was not satisfied',
+		'Waiting for an answer to “{step}”',
+		'Waiting for “{section}” to be completed',
+		'You can start this section.',
+		'Continue with the steps in this section.',
+		'This section is outside the current path.',
+		'All steps are resolved. Completed: {completed}, Skipped: {skipped}.',
+		'This section contains information but has no steps to complete.',
+		'Opens immediately',
+		'Opens after {sections}',
+		'is complete',
+		'are complete',
+		'if {condition}',
+		'AND',
 	];
 
 	/**
@@ -142,10 +151,10 @@ class LocalizationParityTest extends TestCase {
 		$english = $this->translations('en.json');
 		$portuguese = $this->translations('pt_PT.json');
 
-		self::assertSame('The condition on “{step}” is not satisfied', $english['The condition on “{step}” is not satisfied']);
-		self::assertSame('A condição sobre “{step}” não é satisfeita', $portuguese['The condition on “{step}” is not satisfied']);
-		self::assertSame('Reason:', $english['Reason:']);
-		self::assertSame('Motivo:', $portuguese['Reason:']);
+		self::assertSame('The condition on “{step}” was not satisfied', $english['The condition on “{step}” was not satisfied']);
+		self::assertSame('A condição sobre “{step}” não foi satisfeita', $portuguese['The condition on “{step}” was not satisfied']);
+		self::assertSame('Waiting for “{section}” to be completed', $english['Waiting for “{section}” to be completed']);
+		self::assertSame('À espera de que “{section}” seja concluída', $portuguese['Waiting for “{section}” to be completed']);
 	}
 
 	public function testCompiledBundleCarriesTheCorrectedReasonLabels(): void {
@@ -155,7 +164,9 @@ class LocalizationParityTest extends TestCase {
 		}
 
 		$bundle = (string)file_get_contents($bundlePath);
-		self::assertStringContainsString('The condition on “{step}” is not satisfied', $bundle);
+		self::assertStringContainsString('The condition on “{step}” was not satisfied', $bundle);
+		self::assertStringContainsString('Waiting for an answer to “{step}”', $bundle);
+		self::assertStringContainsString('Opens immediately', $bundle);
 		self::assertStringNotContainsString('Condition on "{step}" is not met', $bundle);
 	}
 

@@ -18,6 +18,8 @@ use OCA\Runbook\Controller\StepController;
 use OCA\Runbook\Controller\TemplateController;
 use OCA\Runbook\Controller\WorkController;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
+use OCP\AppFramework\Http\Attribute\NoCSRFRequired;
+use OCP\AppFramework\Http\Attribute\PublicPage;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -34,7 +36,7 @@ class ControllerAuthorizationTest extends TestCase {
 	 */
 	private function userEndpoints(): array {
 		return [
-			TemplateController::class => ['index', 'create', 'show', 'update', 'destroy', 'publish', 'archive'],
+			TemplateController::class => ['index', 'create', 'show', 'update', 'destroy', 'publish', 'archive', 'export', 'import'],
 			SectionController::class => ['create', 'update', 'destroy', 'reorder'],
 			StepController::class => ['create', 'update', 'destroy', 'reorder'],
 			AclController::class => ['index', 'update'],
@@ -72,6 +74,19 @@ class ControllerAuthorizationTest extends TestCase {
 
 	public function testAdminSettingsFeaturesAreUserAccessible(): void {
 		self::assertTrue($this->hasAttribute(AdminSettingsController::class, 'features', NoAdminRequired::class));
+	}
+
+	public function testImportAndExportAreNotPublicAndKeepCsrfProtection(): void {
+		foreach (['export', 'import'] as $method) {
+			self::assertFalse(
+				$this->hasAttribute(TemplateController::class, $method, PublicPage::class),
+				sprintf('TemplateController::%s must require an authenticated user', $method),
+			);
+			self::assertFalse(
+				$this->hasAttribute(TemplateController::class, $method, NoCSRFRequired::class),
+				sprintf('TemplateController::%s must keep the default CSRF protection', $method),
+			);
+		}
 	}
 
 	/**

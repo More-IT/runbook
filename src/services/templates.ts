@@ -11,6 +11,7 @@ import type {
 	Template,
 	TemplateAcl,
 	TemplateDetail,
+	TemplateExportDocument,
 	TemplatePayload,
 	TemplateSection,
 	TemplateStep,
@@ -249,4 +250,27 @@ export async function searchPrincipals(search: string, limit = 25): Promise<Prin
 	})
 
 	return data.principals
+}
+
+/**
+ * Export a template as a portable JSON document.
+ *
+ * @param id Template identifier.
+ */
+export async function exportTemplate(id: number): Promise<TemplateExportDocument> {
+	const { data } = await axios.get<TemplateExportDocument>(endpoint(`/templates/${id}/export`))
+
+	return data
+}
+
+/**
+ * Import a portable template export document as a new draft owned by the
+ * current user.
+ *
+ * @param document Export document exactly as parsed from the selected file.
+ */
+export async function importTemplate(document: TemplateExportDocument): Promise<Template> {
+	const { data } = await axios.post<{ template: Template }>(endpoint('/templates/import'), document)
+
+	return data.template
 }

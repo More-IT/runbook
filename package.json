@@ -1,6 +1,6 @@
 {
   "name": "runbook",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Create, execute and track repeatable procedures as structured, collaborative runbooks.",
   "license": "AGPL-3.0-or-later",
   "private": true,

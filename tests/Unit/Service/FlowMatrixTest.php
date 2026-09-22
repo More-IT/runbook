@@ -579,4 +579,59 @@ class FlowMatrixTest extends TestCase {
 		// A decided-false condition wins over an unsatisfied dependency.
 		self::assertSame(FlowService::STATE_INAPPLICABLE, $result['states'][3]);
 	}
+
+	// --- 8. Zero-step sections keep their real flow state --------------------
+
+	public function testZeroStepSectionResolvesWhenRulesAreSatisfied(): void {
+		$result = $this->flow->evaluate(
+			[$this->section(1, 'X'), $this->section(2, 'Info', [1])],
+			[$this->completed(10, 1, 'CHECK', true)],
+		);
+
+		self::assertSame(FlowService::STATE_RESOLVED, $result['states'][2]);
+		self::assertSame([], $result['reasons'][2] ?? []);
+	}
+
+	public function testZeroStepSectionStaysBlockedOnAnUnsatisfiedDependency(): void {
+		$result = $this->flow->evaluate(
+			[$this->section(1, 'X'), $this->section(2, 'Info', [1])],
+			[$this->pending(10, 1)],
+		);
+
+		self::assertSame(FlowService::STATE_BLOCKED, $result['states'][2]);
+		self::assertSame(['X'], $result['blockedBy'][2]);
+		self::assertSame('dependency', $result['reasons'][2][0]['type']);
+		self::assertSame('X', $result['reasons'][2][0]['title']);
+	}
+
+	public function testZeroStepSectionStaysBlockedOnAPendingCondition(): void {
+		$result = $this->flow->evaluate(
+			[
+				$this->section(1, 'Control'),
+				$this->section(2, 'Info', [], [['stepId' => 10, 'operator' => 'is_true']]),
+			],
+			[$this->pending(10, 1, 'CHECK')],
+		);
+
+		self::assertSame(FlowService::STATE_BLOCKED, $result['states'][2]);
+		self::assertSame('condition_pending', $result['reasons'][2][0]['type']);
+	}
+
+	public function testZeroStepSectionIsInapplicableAndKeepsEveryConditionReason(): void {
+		$result = $this->flow->evaluate(
+			[
+				$this->section(1, 'Control'),
+				$this->section(2, 'Info', [], [
+					['stepId' => 10, 'operator' => 'is_true'],
+					['stepId' => 11, 'operator' => 'is_true'],
+				]),
+			],
+			[$this->completed(10, 1, 'CHECK', false), $this->completed(11, 1, 'CHECK', false)],
+		);
+
+		self::assertSame(FlowService::STATE_INAPPLICABLE, $result['states'][2]);
+		self::assertCount(2, $result['reasons'][2]);
+		self::assertSame('condition_false', $result['reasons'][2][0]['type']);
+		self::assertSame('condition_false', $result['reasons'][2][1]['type']);
+	}
 }

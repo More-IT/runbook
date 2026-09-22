@@ -61,4 +61,20 @@ class AttachmentMapper extends QBMapper {
 
 		return $attachments;
 	}
+
+	/**
+	 * Count persisted evidence attached to one exact step of one run.
+	 *
+	 * Only committed metadata rows are counted, so a failed or in-progress
+	 * upload can never satisfy a required FILE step.
+	 */
+	public function countByRunAndStep(int $runId, int $stepId): int {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select($qb->createFunction('COUNT(*)'))
+			->from($this->tableName)
+			->where($qb->expr()->eq('run_id', $qb->createNamedParameter($runId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('step_id', $qb->createNamedParameter($stepId, IQueryBuilder::PARAM_INT)));
+
+		return (int)$qb->executeQuery()->fetchOne();
+	}
 }

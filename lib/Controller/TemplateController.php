@@ -7,6 +7,8 @@ namespace OCA\Runbook\Controller;
 use OCA\Runbook\Db\Template;
 use OCA\Runbook\Db\TemplateSection;
 use OCA\Runbook\Db\TemplateStep;
+use OCA\Runbook\Service\TemplateExportService;
+use OCA\Runbook\Service\TemplateImportService;
 use OCA\Runbook\Service\TemplateService;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
@@ -19,6 +21,7 @@ use OCP\IRequest;
  * @phpstan-import-type TemplateData from Template
  * @phpstan-import-type SectionData from TemplateSection
  * @phpstan-import-type StepData from TemplateStep
+ * @phpstan-import-type ExportDocument from TemplateExportService
  */
 class TemplateController extends ApiController {
 	private const FIELDS = ['title', 'description'];
@@ -27,6 +30,8 @@ class TemplateController extends ApiController {
 		string $appName,
 		IRequest $request,
 		private readonly TemplateService $templateService,
+		private readonly TemplateExportService $templateExportService,
+		private readonly TemplateImportService $templateImportService,
 	) {
 		parent::__construct($appName, $request);
 	}
@@ -76,6 +81,45 @@ class TemplateController extends ApiController {
 			'sections' => $sections,
 			'permissions' => $this->templateService->getPermissions($template),
 		]);
+	}
+
+	/**
+	 * Export a template the current user may view as a portable JSON document.
+	 *
+	 * The response body is the export document itself (no wrapper), so the
+	 * downloaded file is exactly the contract issue #31 will import. Requires the
+	 * same view permission as the detail endpoint; unauthorized requests are
+	 * rejected without exposing any template content.
+	 *
+	 * @return JSONResponse<Http::STATUS_OK, ExportDocument, array{}>
+	 */
+	#[NoAdminRequired]
+	public function export(): JSONResponse {
+		return new JSONResponse($this->templateExportService->export($this->requireId('id')));
+	}
+
+	/**
+	 * Import a portable template export document as a new DRAFT template.
+	 *
+	 * The request body must be the export document itself (the same shape the
+	 * export endpoint returns), not a wrapper. Nextcloud decodes a JSON request
+	 * body into `getParams()`, so an authored empty configuration object `{}`
+	 * and an empty array `[]` both arrive as an empty PHP array and are treated
+	 * identically. Creation policy and ownership are enforced by the authoring
+	 * service, never by the client.
+	 *
+	 * The size limit is the canonical compact UTF-8 encoding of the decoded
+	 * document, enforced by the service. The installed `IRequest` API exposes no
+	 * raw request body, so a client-declared `Content-Length` is deliberately not
+	 * consulted: it is not proof of the actual body length.
+	 *
+	 * @return JSONResponse<Http::STATUS_CREATED, array{template: TemplateData}, array{}>
+	 */
+	#[NoAdminRequired]
+	public function import(): JSONResponse {
+		$template = $this->templateImportService->import($this->request->getParams());
+
+		return new JSONResponse(['template' => $template->toArray()], Http::STATUS_CREATED);
 	}
 
 	/**

@@ -190,3 +190,39 @@ export interface StepPayload {
 	defaultAssignee?: string | null
 	dueOffset?: string | null
 }
+
+export interface TemplateExportCondition {
+	stepRef: string
+	operator: ConditionOperator
+	value?: string | number | boolean
+}
+
+export interface TemplateExportSection {
+	ref: string
+	title: string
+	description: string
+	notes: string
+	dependsOn: string[]
+	conditions: TemplateExportCondition[]
+}
+
+export interface TemplateExportStep {
+	ref: string
+	sectionRef: string
+	title: string
+	description: string
+	type: StepType
+	required: boolean
+	position: number
+	config: StepConfig
+	defaultAssignee: string | null
+	dueOffset: string | null
+}
+
+export interface TemplateExportDocument {
+	format: 'runbook-template'
+	schemaVersion: number
+	template: { title: string, description: string }
+	sections: TemplateExportSection[]
+	steps: TemplateExportStep[]
+}

@@ -8,6 +8,8 @@ use OCA\Runbook\Db\Attachment;
 use OCA\Runbook\Db\AttachmentMapper;
 use OCA\Runbook\Enum\ActivityType;
 use OCA\Runbook\Enum\RunStatus;
+use OCA\Runbook\Enum\RunStepStatus;
+use OCA\Runbook\Enum\StepType;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\IUserSession;
@@ -44,6 +46,7 @@ class AttachmentService {
 		private readonly AttachmentMapper $attachments,
 		private readonly RunService $runService,
 		private readonly RunStepService $runStepService,
+		private readonly EvidenceLockService $evidenceLock,
 		private readonly RunAccessService $access,
 		private readonly EvidenceStorage $storage,
 		private readonly ActivityService $activity,
@@ -155,14 +158,28 @@ class AttachmentService {
 			throw new ForbiddenException('not_allowed');
 		}
 
-		// Persist the event before removing the metadata.
-		$this->activity->record($run->getId(), $attachment->getStepId(), ActivityType::AttachmentDeleted, [
-			'attachmentId' => $attachment->getId(),
-			'filename' => $attachment->getFilename(),
-		], $uid);
+		// The count check and the removal must be atomic with step completion so
+		// two concurrent deletions cannot both remove the last two attachments.
+		$this->evidenceLock->synchronized($run->getId(), $attachment->getStepId(), function () use ($run, $attachment, $uid): void {
+			// A completed required FILE step must keep at least one piece of
+			// evidence. Upload a replacement first, then delete the old file.
+			$step = $this->runStepService->findStep($attachment->getStepId());
+			if ($step->getType() === StepType::File->value
+				&& $step->getRequired()
+				&& $step->getStatus() === RunStepStatus::Completed->value
+				&& $this->attachments->countByRunAndStep($run->getId(), $step->getId()) <= 1) {
+				throw new ConflictException('last_file_evidence_required');
+			}
 
-		$this->storage->delete($run->getId(), $attachment->getStepId(), $attachment->getStorageKey());
-		$this->attachments->delete($attachment);
+			// Persist the event before removing the metadata.
+			$this->activity->record($run->getId(), $attachment->getStepId(), ActivityType::AttachmentDeleted, [
+				'attachmentId' => $attachment->getId(),
+				'filename' => $attachment->getFilename(),
+			], $uid);
+
+			$this->storage->delete($run->getId(), $attachment->getStepId(), $attachment->getStorageKey());
+			$this->attachments->delete($attachment);
+		});
 	}
 
 	private function requireAttachment(int $id): Attachment {

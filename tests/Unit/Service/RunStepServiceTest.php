@@ -117,12 +117,149 @@ class RunStepServiceTest extends RunTestBase {
 		$this->runStepServiceFor('alice')->complete($step->getId(), ['response' => 'ghost']);
 	}
 
-	public function testRequiredFileStepReportsUnsupportedUpload(): void {
+	public function testRequiredFileStepWithoutEvidenceIsRejected(): void {
 		$this->addUser('alice');
 		$step = $this->createStep('FILE', true);
 
+		try {
+			$this->runStepServiceFor('alice')->complete($step->getId(), []);
+			self::fail('A required FILE step must not complete without evidence');
+		} catch (ValidationException $exception) {
+			self::assertSame('file_evidence_required', $exception->getReason());
+		}
+		self::assertSame(RunStepStatus::Pending->value, $this->runSteps[$step->getId()]->getStatus());
+	}
+
+	public function testRequiredFileStepCompletesWithPersistedEvidence(): void {
+		$this->addUser('alice');
+		$step = $this->createStep('FILE', true);
+		$this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'evidence.txt', 'content' => 'x']);
+
+		$completed = $this->runStepServiceFor('alice')->complete($step->getId(), []);
+
+		self::assertSame(RunStepStatus::Completed->value, $completed->getStatus());
+		self::assertNull($completed->getResponseValue(), 'FILE steps never store a response value');
+	}
+
+	public function testRequiredFileStepIgnoresEvidenceFromAnotherStep(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$target = $this->addRunStep($section->getId(), 'FILE', true, RunStepStatus::Pending->value, 0);
+		$other = $this->addRunStep($section->getId(), 'FILE', true, RunStepStatus::Pending->value, 1);
+		$this->attachmentServiceFor('alice')->upload($other->getId(), ['name' => 'evidence.txt', 'content' => 'x']);
+
+		$this->expectException(ValidationException::class);
+		$this->runStepServiceFor('alice')->complete($target->getId(), []);
+	}
+
+	public function testRequiredFileStepIgnoresEvidenceFromAnotherRun(): void {
+		$this->addUser('alice');
+		$target = $this->createStep('FILE', true);
+		$other = $this->createStep('FILE', true);
+		$this->attachmentServiceFor('alice')->upload($other->getId(), ['name' => 'evidence.txt', 'content' => 'x']);
+
+		$this->expectException(ValidationException::class);
+		$this->runStepServiceFor('alice')->complete($target->getId(), []);
+	}
+
+	public function testFailedFileUploadDoesNotEnableCompletion(): void {
+		$this->addUser('alice');
+		$step = $this->createStep('FILE', true);
+		$this->forcedMimeType = 'application/x-msdownload';
+
+		try {
+			$this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'e.exe', 'content' => 'MZ']);
+		} catch (ValidationException) {
+		}
+		self::assertSame([], $this->attachments);
+
 		$this->expectException(ValidationException::class);
 		$this->runStepServiceFor('alice')->complete($step->getId(), []);
+	}
+
+	public function testFileStepRejectsNonNullResponse(): void {
+		$this->addUser('alice');
+		$step = $this->createStep('FILE', false);
+		$this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'evidence.txt', 'content' => 'x']);
+
+		try {
+			$this->runStepServiceFor('alice')->complete($step->getId(), ['response' => 'artifact']);
+			self::fail('A FILE step must reject a non-null response');
+		} catch (ValidationException $exception) {
+			self::assertSame('invalid_file_response', $exception->getReason());
+		}
+		self::assertSame(RunStepStatus::Pending->value, $this->runSteps[$step->getId()]->getStatus());
+	}
+
+	public function testRequiredFileStepCannotCompleteOnInactiveRunEvenWithEvidence(): void {
+		$this->addUser('alice');
+		$step = $this->createStep('FILE', true, [], RunStatus::Completed->value);
+		$runId = $this->runSections[$step->getRunSectionId()]->getRunId();
+		$this->addAttachment($runId, $step->getId(), 'alice');
+
+		$this->expectException(ConflictException::class);
+		$this->runStepServiceFor('alice')->complete($step->getId(), []);
+	}
+
+	public function testNonExecutorCannotCompleteFileStepEvenWithEvidence(): void {
+		$this->addUser('alice');
+		$this->addUser('bob');
+		$this->addUser('carol');
+		$run = $this->addRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$step = $this->addRunStep($section->getId(), 'FILE', true, RunStepStatus::Pending->value, 0);
+		$this->seedRunAcl($run->getId(), PrincipalType::User->value, 'carol', RunAclRole::Viewer->value);
+		$this->addAttachment($run->getId(), $step->getId(), 'alice');
+
+		$this->expectException(ForbiddenException::class);
+		$this->runStepServiceFor('carol')->complete($step->getId(), []);
+	}
+
+	public function testFileStepUpdateRejectsNonNullResponse(): void {
+		$this->addUser('alice');
+		$step = $this->createStep('FILE', false);
+
+		try {
+			$this->runStepServiceFor('alice')->update($step->getId(), ['response' => 'artifact']);
+			self::fail('A FILE step must reject a non-null response on update');
+		} catch (ValidationException $exception) {
+			self::assertSame('file_upload_not_supported', $exception->getReason());
+		}
+		self::assertNull($this->runSteps[$step->getId()]->getResponseValue());
+	}
+
+	public function testCompletedFileStepCannotBeCompletedAgain(): void {
+		$this->addUser('alice');
+		$step = $this->createStep('FILE', true);
+		$this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'evidence.txt', 'content' => 'x']);
+		$this->runStepServiceFor('alice')->complete($step->getId(), []);
+
+		$this->expectException(ConflictException::class);
+		$this->runStepServiceFor('alice')->complete($step->getId(), []);
+	}
+
+	public function testCompletionIsRejectedWhileTheStepEvidenceLockIsHeld(): void {
+		$this->addUser('alice');
+		$step = $this->createStep('FILE', true);
+		$this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'evidence.txt', 'content' => 'x']);
+		$runId = $this->runSections[$step->getRunSectionId()]->getRunId();
+		$path = $this->evidenceLock->path($runId, $step->getId());
+		$this->heldLocks[$path] = \OCP\Lock\ILockingProvider::LOCK_EXCLUSIVE;
+
+		try {
+			$this->runStepServiceFor('alice')->complete($step->getId(), []);
+			self::fail('Completion must not enter while the step evidence lock is held');
+		} catch (ConflictException $exception) {
+			self::assertSame('evidence_locked', $exception->getReason());
+		}
+		self::assertSame(RunStepStatus::Pending->value, $this->runSteps[$step->getId()]->getStatus());
+
+		unset($this->heldLocks[$path]);
+		self::assertSame(
+			RunStepStatus::Completed->value,
+			$this->runStepServiceFor('alice')->complete($step->getId(), [])->getStatus(),
+		);
 	}
 
 	public function testOptionalFileStepCanBeCompletedWithoutEvidence(): void {

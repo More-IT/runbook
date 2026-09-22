@@ -9,6 +9,7 @@ return [
 
 		['name' => 'template#index', 'url' => '/api/v1/templates', 'verb' => 'GET'],
 		['name' => 'template#create', 'url' => '/api/v1/templates', 'verb' => 'POST'],
+		['name' => 'template#import', 'url' => '/api/v1/templates/import', 'verb' => 'POST'],
 		['name' => 'template#show', 'url' => '/api/v1/templates/{id}', 'verb' => 'GET'],
 		['name' => 'template#update', 'url' => '/api/v1/templates/{id}', 'verb' => 'PATCH'],
 		['name' => 'template#destroy', 'url' => '/api/v1/templates/{id}', 'verb' => 'DELETE'],
@@ -16,6 +17,7 @@ return [
 		['name' => 'template#archive', 'url' => '/api/v1/templates/{id}/archive', 'verb' => 'POST'],
 		['name' => 'template#unarchive', 'url' => '/api/v1/templates/{id}/unarchive', 'verb' => 'POST'],
 		['name' => 'template#duplicate', 'url' => '/api/v1/templates/{id}/duplicate', 'verb' => 'POST'],
+		['name' => 'template#export', 'url' => '/api/v1/templates/{id}/export', 'verb' => 'GET'],
 
 		['name' => 'section#create', 'url' => '/api/v1/templates/{templateId}/sections', 'verb' => 'POST'],
 		['name' => 'section#update', 'url' => '/api/v1/sections/{id}', 'verb' => 'PATCH'],

@@ -16,6 +16,7 @@ import NcTextArea from '@nextcloud/vue/components/NcTextArea'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { attachmentDownloadUrl } from '../services/runs.ts'
 import { searchPrincipals } from '../services/templates.ts'
+import { canCompleteStep, canRemoveEvidence, missingRequiredFileEvidence } from '../utils/runEvidence.ts'
 
 const props = defineProps<{
 	step: RunStep
@@ -83,7 +84,8 @@ const numberFieldLabel = computed<string>(() => unit.value === ''
 	: t('runbook', 'Response ({unit})', { unit: unit.value }))
 
 const isEditable = computed<boolean>(() => props.step.status === 'PENDING' || props.step.status === 'IN_PROGRESS')
-const canComplete = computed<boolean>(() => props.step.type !== 'FILE' || !props.step.required)
+const canComplete = computed<boolean>(() => canCompleteStep(props.step.type, props.step.required, props.attachments.length))
+const missingEvidence = computed<boolean>(() => missingRequiredFileEvidence(props.step.type, props.step.required, props.attachments.length))
 const isOverdue = computed<boolean>(() => isEditable.value && props.step.dueAt !== null && props.step.dueAt < Date.now() / 1000)
 
 /**
@@ -310,7 +312,11 @@ function formatFileSize(size: number): string {
  * @param attachment Attachment to check.
  */
 function canDeleteEvidence(attachment: RunAttachment): boolean {
-	return props.runActive && (props.isOwner || attachment.uploaderUid === props.uid)
+	if (!props.runActive || !(props.isOwner || attachment.uploaderUid === props.uid)) {
+		return false
+	}
+
+	return canRemoveEvidence(props.step.type, props.step.required, props.step.status, props.attachments.length)
 }
 
 /**
@@ -462,6 +468,9 @@ function submitAssignment(): void {
 		</div>
 
 		<div v-if="canExecute && runActive && isEditable" class="runbook-run-step__actions">
+			<p v-if="missingEvidence" class="runbook-run-step__evidence-hint">
+				{{ t('runbook', 'Attach at least one file before completing this step.') }}
+			</p>
 			<NcButton v-if="step.status === 'PENDING'" @click="emit('start')">
 				{{ t('runbook', 'Start') }}
 			</NcButton>
@@ -636,6 +645,13 @@ function submitAssignment(): void {
 	flex-wrap: wrap;
 	gap: 8px;
 	margin-top: 8px;
+}
+
+.runbook-run-step__evidence-hint {
+	flex-basis: 100%;
+	margin: 0;
+	color: var(--color-text-maxcontrast, #555);
+	font-size: 0.9em;
 }
 
 .runbook-run-step__assign {

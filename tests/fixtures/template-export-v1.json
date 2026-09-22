@@ -1,0 +1,195 @@
+{
+  "format": "runbook-template",
+  "schemaVersion": 1,
+  "template": {
+    "title": "Contoso Release",
+    "description": "Representative export used by the cross-runtime contract tests."
+  },
+  "sections": [
+    {
+      "ref": "s1",
+      "title": "Configuration",
+      "description": "Collect the release parameters.",
+      "notes": "Fill in every field before continuing.",
+      "dependsOn": [],
+      "conditions": []
+    },
+    {
+      "ref": "s2",
+      "title": "Manual notes",
+      "description": "This section only carries information.",
+      "notes": "Read the team runbook before proceeding.",
+      "dependsOn": [],
+      "conditions": []
+    },
+    {
+      "ref": "s3",
+      "title": "Production",
+      "description": "",
+      "notes": "",
+      "dependsOn": [
+        "s1"
+      ],
+      "conditions": [
+        {
+          "stepRef": "t1",
+          "operator": "equals",
+          "value": "prod"
+        },
+        {
+          "stepRef": "t2",
+          "operator": "greater_than",
+          "value": 5.5
+        }
+      ]
+    },
+    {
+      "ref": "s4",
+      "title": "Development",
+      "description": "",
+      "notes": "",
+      "dependsOn": [
+        "s1"
+      ],
+      "conditions": [
+        {
+          "stepRef": "t1",
+          "operator": "equals",
+          "value": "dev"
+        }
+      ]
+    },
+    {
+      "ref": "s5",
+      "title": "Final checks",
+      "description": "",
+      "notes": "",
+      "dependsOn": [
+        "s3",
+        "s4"
+      ],
+      "conditions": [
+        {
+          "stepRef": "t1",
+          "operator": "equals",
+          "value": "prod"
+        },
+        {
+          "stepRef": "t2",
+          "operator": "greater_than",
+          "value": 10.5
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "ref": "t1",
+      "sectionRef": "s1",
+      "title": "Environment",
+      "description": "",
+      "type": "SELECT",
+      "required": true,
+      "position": 0,
+      "config": {
+        "options": [
+          "dev",
+          "prod"
+        ]
+      },
+      "defaultAssignee": null,
+      "dueOffset": "60"
+    },
+    {
+      "ref": "t2",
+      "sectionRef": "s1",
+      "title": "Amount",
+      "description": "",
+      "type": "NUMBER",
+      "required": true,
+      "position": 1,
+      "config": {
+        "unit": "kg",
+        "decimals": 2
+      },
+      "defaultAssignee": null,
+      "dueOffset": null
+    },
+    {
+      "ref": "t3",
+      "sectionRef": "s1",
+      "title": "Release notes",
+      "description": "",
+      "type": "TEXT",
+      "required": false,
+      "position": 2,
+      "config": {
+        "maxLength": 200
+      },
+      "defaultAssignee": null,
+      "dueOffset": null
+    },
+    {
+      "ref": "t4",
+      "sectionRef": "s3",
+      "title": "Backup verified",
+      "description": "",
+      "type": "CHECK",
+      "required": true,
+      "position": 0,
+      "config": {},
+      "defaultAssignee": null,
+      "dueOffset": null
+    },
+    {
+      "ref": "t5",
+      "sectionRef": "s3",
+      "title": "Release date",
+      "description": "",
+      "type": "DATE",
+      "required": true,
+      "position": 1,
+      "config": {},
+      "defaultAssignee": null,
+      "dueOffset": "1440"
+    },
+    {
+      "ref": "t6",
+      "sectionRef": "s3",
+      "title": "Approver",
+      "description": "",
+      "type": "USER",
+      "required": true,
+      "position": 2,
+      "config": {},
+      "defaultAssignee": "principals/users/alice",
+      "dueOffset": null
+    },
+    {
+      "ref": "t7",
+      "sectionRef": "s4",
+      "title": "Reviewed",
+      "description": "",
+      "type": "CONFIRMATION",
+      "required": true,
+      "position": 0,
+      "config": {},
+      "defaultAssignee": null,
+      "dueOffset": null
+    },
+    {
+      "ref": "t8",
+      "sectionRef": "s5",
+      "title": "Evidence",
+      "description": "",
+      "type": "FILE",
+      "required": false,
+      "position": 0,
+      "config": {
+        "accept": "pdf"
+      },
+      "defaultAssignee": null,
+      "dueOffset": null
+    }
+  ]
+}

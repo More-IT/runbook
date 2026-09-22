@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OCA\Runbook\Service;
 
+use OCA\Runbook\Db\AttachmentMapper;
 use OCA\Runbook\Db\Run;
 use OCA\Runbook\Db\RunMapper;
 use OCA\Runbook\Db\RunSectionMapper;
@@ -32,6 +33,8 @@ class RunStepService {
 		private readonly RunMapper $runs,
 		private readonly RunSectionMapper $runSections,
 		private readonly RunStepMapper $runSteps,
+		private readonly AttachmentMapper $attachments,
+		private readonly EvidenceLockService $evidenceLock,
 		private readonly RunAccessService $access,
 		private readonly PrincipalValidator $principalValidator,
 		private readonly StepResponseValidator $validator,
@@ -122,25 +125,39 @@ class RunStepService {
 		$type = $this->stepType($step);
 		$provided = array_key_exists('response', $data) && $data['response'] !== null;
 
-		if ($type === StepType::File && ($provided || $step->getRequired())) {
-			// File evidence is not implemented yet. Optional file steps can be
-			// completed without a response; required ones cannot be resolved.
-			throw new ValidationException('file_upload_not_supported');
+		$completeStep = function () use ($step): void {
+			$now = $this->timeFactory->getTime();
+			$step->setStatus(RunStepStatus::Completed->value);
+			$step->setCompletedAt($now);
+			$step->setSkipReason(null);
+			$this->runSteps->update($step);
+		};
+
+		if ($type === StepType::File) {
+			// FILE steps are resolved through evidence, never a response value.
+			if ($provided) {
+				throw new ValidationException('invalid_file_response');
+			}
+			$step->setResponseValue(null);
+
+			// The evidence check and the status update must be atomic with
+			// evidence deletion, so they share the per-step evidence lock.
+			$this->evidenceLock->synchronized($run->getId(), $step->getId(), function () use ($run, $step, $completeStep): void {
+				if ($step->getRequired() && $this->countStepEvidence($run, $step) === 0) {
+					throw new ValidationException('file_evidence_required');
+				}
+				$completeStep();
+			});
+		} else {
+			if ($provided) {
+				$step->setResponseValue($this->validator->validate($type, $data['response'], $step->getConfigArray()));
+			}
+			if ($step->getRequired() && $step->getResponseValue() === null) {
+				throw new ValidationException('response_required');
+			}
+			$completeStep();
 		}
 
-		if ($provided) {
-			$step->setResponseValue($this->validator->validate($type, $data['response'], $step->getConfigArray()));
-		}
-
-		if ($step->getRequired() && $step->getResponseValue() === null) {
-			throw new ValidationException('response_required');
-		}
-
-		$now = $this->timeFactory->getTime();
-		$step->setStatus(RunStepStatus::Completed->value);
-		$step->setCompletedAt($now);
-		$step->setSkipReason(null);
-		$step = $this->runSteps->update($step);
 		$this->touchRun($run);
 		$this->activity->record($run->getId(), $step->getId(), ActivityType::StepCompleted, [], $this->currentUserId());
 
@@ -293,6 +310,25 @@ class RunStepService {
 	 */
 	public function requireExecutableStep(int $stepId): array {
 		return $this->requireStepForExecution($stepId);
+	}
+
+	/**
+	 * Load a run step by id for read-only callers that already checked access
+	 * (for example evidence deletion in {@see AttachmentService}).
+	 */
+	public function findStep(int $stepId): RunStep {
+		try {
+			return $this->runSteps->find($stepId);
+		} catch (DoesNotExistException) {
+			throw new NotFoundException('run_step_not_found');
+		}
+	}
+
+	/**
+	 * Number of persisted attachments belonging to this exact step and run.
+	 */
+	private function countStepEvidence(Run $run, RunStep $step): int {
+		return $this->attachments->countByRunAndStep($run->getId(), $step->getId());
 	}
 
 	/**

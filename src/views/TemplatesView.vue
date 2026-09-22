@@ -5,7 +5,8 @@
 
 <script setup lang="ts">
 import type { AppFeatures } from '../models/adminSettings.ts'
-import type { Template } from '../models/template.ts'
+import type { Template, TemplateExportDocument } from '../models/template.ts'
+import type { ImportSummary } from '../utils/templateImport.ts'
 
 import { translate as t } from '@nextcloud/l10n'
 import { computed, onMounted, ref } from 'vue'
@@ -20,6 +21,11 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TemplateStatusBadge from '../components/TemplateStatusBadge.vue'
 import { useTemplateList } from '../composables/useTemplateList.ts'
 import { getFeatures } from '../services/adminSettings.ts'
+import { exportTemplate, importTemplate } from '../services/templates.ts'
+import { apiErrorMessage } from '../utils/apiError.ts'
+import { canCloseImportDialog, canStartImport, runTemplateImport } from '../utils/importFlow.ts'
+import { downloadJson, exportFilename } from '../utils/templateExport.ts'
+import { assertSourceFileSize, parseTemplateImport, TemplateImportError } from '../utils/templateImport.ts'
 
 const props = withDefaults(defineProps<{
 	archivedOnly?: boolean
@@ -43,6 +49,17 @@ const pendingUnarchive = ref<Template | null>(null)
 const deleting = ref(false)
 const unarchiving = ref(false)
 const duplicatingId = ref<number | null>(null)
+const exportingId = ref<number | null>(null)
+const exportError = ref<string | null>(null)
+const showImport = ref(false)
+const importFileName = ref('')
+const importSummary = ref<ImportSummary | null>(null)
+const importDocument = ref<TemplateExportDocument | null>(null)
+const importing = ref(false)
+const importError = ref<string | null>(null)
+const importedTemplate = ref<Template | null>(null)
+const importWarning = ref<string | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
 
 const visibleTemplates = computed<Template[]>(() => props.archivedOnly
 	? templates.value.filter((template) => template.status === 'ARCHIVED')
@@ -149,19 +166,222 @@ async function duplicateTemplate(template: Template): Promise<void> {
 		emit('open', copy.id)
 	}
 }
+
+/**
+ * Download a portable JSON export of a template.
+ *
+ * @param template Template to export.
+ */
+async function exportTemplateFile(template: Template): Promise<void> {
+	if (exportingId.value !== null) {
+		return
+	}
+	exportingId.value = template.id
+	exportError.value = null
+	try {
+		const document = await exportTemplate(template.id)
+		downloadJson(exportFilename(template.title), document)
+	} catch (caught) {
+		exportError.value = apiErrorMessage(caught)
+	} finally {
+		exportingId.value = null
+	}
+}
+
+/**
+ * Translate a selected-file parsing failure or a server import error.
+ *
+ * @param caught Value thrown while parsing or importing.
+ */
+function importErrorMessage(caught: unknown): string {
+	if (caught instanceof TemplateImportError) {
+		if (caught.code === 'invalid_json') {
+			return t('runbook', 'This file is not valid JSON.')
+		}
+		if (caught.code === 'too_large') {
+			return t('runbook', 'This file is too large to import.')
+		}
+
+		return t('runbook', 'This file is not a Runbook template export.')
+	}
+
+	return apiErrorMessage(caught)
+}
+
+/**
+ * Clear the import selection so the same file can be chosen again.
+ *
+ * The import dialog is only ever reset once no request is in flight, so a
+ * successful creation can never be hidden by a late close.
+ */
+function resetImport(): void {
+	showImport.value = false
+	importFileName.value = ''
+	importSummary.value = null
+	importDocument.value = null
+	importError.value = null
+	if (fileInput.value !== null) {
+		fileInput.value.value = ''
+	}
+}
+
+/**
+ * Handle a close request from the confirmation dialog.
+ *
+ * `@closing` is emitted after the dialog has already begun closing and is not
+ * cancellable, so this only performs cleanup and must never be described as
+ * vetoing closure. Suppression of the supported user close paths relies on
+ * `noClose`/`closeOnClickOutside` plus the disabled Cancel button. A close that
+ * slips through the tiny race before `importing` is reflected in the render
+ * cannot cancel the in-flight request: it still completes and, on success, the
+ * created template is preserved and offered for recovery.
+ */
+function onImportDialogClosing(): void {
+	if (!canCloseImportDialog(importing.value)) {
+		return
+	}
+	resetImport()
+}
+
+/**
+ * Cancel the confirmation dialog, unless an import is in flight.
+ */
+function onImportCancel(): void {
+	if (!canCloseImportDialog(importing.value)) {
+		return
+	}
+	resetImport()
+}
+
+/**
+ * Open the local file picker.
+ */
+function openImportPicker(): void {
+	importError.value = null
+	fileInput.value?.click()
+}
+
+/**
+ * Read and parse the selected file, then show the confirmation dialog.
+ *
+ * Only the local source-file safety cap is checked here, before reading, so an
+ * unreasonably large file is never loaded into memory. No document-size decision
+ * is made in the browser: the server's canonical cap is authoritative, because
+ * JavaScript and PHP serialise some values to different lengths.
+ *
+ * @param event File input change event.
+ */
+async function onImportFileSelected(event: Event): Promise<void> {
+	const input = event.target as HTMLInputElement
+	const file = input.files?.[0] ?? null
+	input.value = ''
+	if (file === null) {
+		return
+	}
+
+	importError.value = null
+	try {
+		assertSourceFileSize(file.size)
+		const parsed = parseTemplateImport(await file.text())
+		importFileName.value = file.name
+		importSummary.value = parsed.summary
+		importDocument.value = parsed.document
+		showImport.value = true
+	} catch (caught) {
+		importSummary.value = null
+		importDocument.value = null
+		importError.value = importErrorMessage(caught)
+	}
+}
+
+/**
+ * Create the new draft from the parsed document.
+ *
+ * A refresh or navigation problem after a successful creation is not reported
+ * as a failed import: the created template is preserved and offered for reopening
+ * so the user never retries (and duplicates) a template that already exists.
+ */
+async function confirmImport(): Promise<void> {
+	if (!canStartImport(importing.value) || importDocument.value === null) {
+		return
+	}
+	importing.value = true
+	importError.value = null
+	importWarning.value = null
+
+	const result = await runTemplateImport(importDocument.value, {
+		create: (document) => importTemplate(document),
+		refresh: () => refresh(),
+		open: (template) => emit('open', template.id),
+	})
+	importing.value = false
+
+	if (result.status === 'failed') {
+		importError.value = importErrorMessage(result.error)
+		return
+	}
+
+	importedTemplate.value = result.template
+	if (!result.refreshed) {
+		importWarning.value = t('runbook', 'The template was created, but the list could not be refreshed.')
+	} else if (!result.opened) {
+		importWarning.value = t('runbook', 'The template was created, but it could not be opened automatically.')
+	}
+	resetImport()
+}
+
+/**
+ * Open the template created by the last successful import.
+ */
+function openImportedTemplate(): void {
+	if (importedTemplate.value === null) {
+		return
+	}
+	emit('open', importedTemplate.value.id)
+}
 </script>
 
 <template>
 	<section class="runbook-view">
 		<header class="runbook-view__header">
 			<h2>{{ archivedOnly ? t('runbook', 'Archived templates') : t('runbook', 'Templates') }}</h2>
-			<NcButton v-if="canCreate" variant="primary" @click="showCreate = true">
-				{{ t('runbook', 'New template') }}
-			</NcButton>
+			<div v-if="canCreate" class="runbook-view__actions">
+				<NcButton @click="openImportPicker">
+					{{ t('runbook', 'Import template') }}
+				</NcButton>
+				<NcButton variant="primary" @click="showCreate = true">
+					{{ t('runbook', 'New template') }}
+				</NcButton>
+			</div>
 		</header>
 
 		<NcNoteCard v-if="error" type="error">
 			{{ error }}
+		</NcNoteCard>
+		<NcNoteCard v-if="exportError" type="error">
+			{{ exportError }}
+		</NcNoteCard>
+		<NcNoteCard v-if="importError && !showImport" type="error">
+			{{ importError }}
+		</NcNoteCard>
+		<NcNoteCard v-if="importWarning" type="warning">
+			{{ importWarning }}
+		</NcNoteCard>
+		<NcNoteCard v-if="importedTemplate !== null" type="success">
+			<p>
+				{{ t('runbook', 'The template was created as a new draft.') }}
+			</p>
+			<p class="runbook-view__summary-title">
+				{{ importedTemplate.title || t('runbook', 'Untitled template') }}
+			</p>
+			<div class="runbook-view__actions">
+				<NcButton @click="openImportedTemplate">
+					{{ t('runbook', 'Open imported template') }}
+				</NcButton>
+				<NcButton @click="importedTemplate = null; importWarning = null">
+					{{ t('runbook', 'Dismiss') }}
+				</NcButton>
+			</div>
 		</NcNoteCard>
 
 		<NcNoteCard v-if="!canCreate" type="info">
@@ -177,6 +397,9 @@ async function duplicateTemplate(template: Template): Promise<void> {
 			:name="archivedOnly ? t('runbook', 'No archived templates') : t('runbook', 'No templates yet')"
 			:description="t('runbook', 'Create your first runbook template to get started.')">
 			<template v-if="canCreate" #action>
+				<NcButton @click="openImportPicker">
+					{{ t('runbook', 'Import template') }}
+				</NcButton>
 				<NcButton variant="primary" @click="showCreate = true">
 					{{ t('runbook', 'New template') }}
 				</NcButton>
@@ -199,6 +422,9 @@ async function duplicateTemplate(template: Template): Promise<void> {
 					<NcButton @click="emit('open', template.id)">
 						{{ t('runbook', 'Open') }}
 					</NcButton>
+					<NcButton :disabled="exportingId === template.id" @click="exportTemplateFile(template)">
+						{{ exportingId === template.id ? t('runbook', 'Exporting…') : t('runbook', 'Export') }}
+					</NcButton>
 					<NcButton v-if="canDuplicate(template)" :disabled="duplicatingId === template.id" @click="duplicateTemplate(template)">
 						{{ t('runbook', 'Duplicate') }}
 					</NcButton>
@@ -212,6 +438,13 @@ async function duplicateTemplate(template: Template): Promise<void> {
 			</li>
 		</ul>
 
+		<input
+			ref="fileInput"
+			type="file"
+			accept=".json,application/json"
+			class="runbook-view__file-input"
+			@change="onImportFileSelected">
+
 		<NcDialog v-if="showCreate" :name="t('runbook', 'New template')" @closing="showCreate = false">
 			<NcTextField v-model="createTitle" :label="t('runbook', 'Title')" />
 			<NcTextArea v-model="createDescription" :label="t('runbook', 'Description')" />
@@ -221,6 +454,42 @@ async function duplicateTemplate(template: Template): Promise<void> {
 				</NcButton>
 				<NcButton variant="primary" :disabled="creating" @click="submitCreate">
 					{{ t('runbook', 'Create') }}
+				</NcButton>
+			</template>
+		</NcDialog>
+
+		<NcDialog
+			v-if="showImport && importSummary !== null"
+			:name="t('runbook', 'Import template')"
+			:noClose="importing"
+			:closeOnClickOutside="!importing"
+			@closing="onImportDialogClosing">
+			<p>
+				{{ t('runbook', 'A new draft owned by you will be created from this file. No existing template is changed.') }}
+			</p>
+			<p class="runbook-view__summary-title">
+				{{ importSummary.title || t('runbook', 'Untitled template') }}
+			</p>
+			<p v-if="importSummary.description !== ''">
+				{{ importSummary.description }}
+			</p>
+			<p>
+				{{ t('runbook', 'Sections') }}: {{ importSummary.sections }}
+				&middot;
+				{{ t('runbook', 'Steps') }}: {{ importSummary.steps }}
+			</p>
+			<p v-if="importFileName !== ''" class="runbook-view__file-name">
+				{{ importFileName }}
+			</p>
+			<NcNoteCard v-if="importError" type="error">
+				{{ importError }}
+			</NcNoteCard>
+			<template #actions>
+				<NcButton :disabled="importing" @click="onImportCancel">
+					{{ t('runbook', 'Cancel') }}
+				</NcButton>
+				<NcButton variant="primary" :disabled="importing" @click="confirmImport">
+					{{ importing ? t('runbook', 'Importing…') : t('runbook', 'Import') }}
 				</NcButton>
 			</template>
 		</NcDialog>
@@ -256,6 +525,24 @@ async function duplicateTemplate(template: Template): Promise<void> {
 	align-items: center;
 	gap: 8px;
 	margin-bottom: 16px;
+}
+
+.runbook-view__actions {
+	display: flex;
+	gap: 8px;
+}
+
+.runbook-view__file-input {
+	display: none;
+}
+
+.runbook-view__summary-title {
+	font-weight: bold;
+}
+
+.runbook-view__file-name {
+	color: var(--color-text-maxcontrast, #555);
+	font-size: 0.85em;
 }
 
 .runbook-view__center {
