@@ -77,4 +77,77 @@ class AttachmentMapper extends QBMapper {
 
 		return (int)$qb->executeQuery()->fetchOne();
 	}
+
+	/**
+	 * Distinct run ids that still have an attachment of the given storage kind,
+	 * oldest run first (issue #55 migration enumeration).
+	 *
+	 * @return list<int>
+	 */
+	public function findRunIdsByStorageKind(string $storageKind, int $limit = 0): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->selectDistinct('run_id')
+			->from($this->tableName)
+			->where($qb->expr()->eq('storage_kind', $qb->createNamedParameter($storageKind)))
+			->orderBy('run_id', 'ASC');
+		if ($limit > 0) {
+			$qb->setMaxResults($limit);
+		}
+
+		$result = $qb->executeQuery();
+		$ids = [];
+		while (($value = $result->fetchOne()) !== false) {
+			$ids[] = (int)$value;
+		}
+		$result->closeCursor();
+
+		return $ids;
+	}
+
+	/**
+	 * Number of attachments of the given storage kind (issue #55 progress).
+	 */
+	public function countByStorageKind(string $storageKind): int {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select($qb->createFunction('COUNT(*)'))
+			->from($this->tableName)
+			->where($qb->expr()->eq('storage_kind', $qb->createNamedParameter($storageKind)));
+
+		return (int)$qb->executeQuery()->fetchOne();
+	}
+
+	/**
+	 * Distinct run ids with an attachment carrying the given migration reason
+	 * (issue #55 residual AppData cleanup), oldest run first.
+	 *
+	 * @return list<int>
+	 */
+	public function findRunIdsByMigrationReason(string $reason): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->selectDistinct('run_id')
+			->from($this->tableName)
+			->where($qb->expr()->eq('migration_reason', $qb->createNamedParameter($reason)))
+			->orderBy('run_id', 'ASC');
+
+		$result = $qb->executeQuery();
+		$ids = [];
+		while (($value = $result->fetchOne()) !== false) {
+			$ids[] = (int)$value;
+		}
+		$result->closeCursor();
+
+		return $ids;
+	}
+
+	/**
+	 * Number of attachments carrying the given migration reason (issue #55).
+	 */
+	public function countByMigrationReason(string $reason): int {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select($qb->createFunction('COUNT(*)'))
+			->from($this->tableName)
+			->where($qb->expr()->eq('migration_reason', $qb->createNamedParameter($reason)));
+
+		return (int)$qb->executeQuery()->fetchOne();
+	}
 }

@@ -1,6 +1,6 @@
 {
   "name": "runbook",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Create, execute and track repeatable procedures as structured, collaborative runbooks.",
   "license": "AGPL-3.0-or-later",
   "private": true,
@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@nextcloud/axios": "^2.6.0",
+    "@nextcloud/dialogs": "^7.4.0",
     "@nextcloud/l10n": "^3.4.1",
     "@nextcloud/router": "^3.2.0",
     "@nextcloud/vue": "^9.13.0",

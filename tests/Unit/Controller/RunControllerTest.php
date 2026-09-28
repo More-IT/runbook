@@ -107,6 +107,21 @@ class RunControllerTest extends TestCase {
 		self::assertSame('Run', $response->getData()['run']['title']);
 	}
 
+	public function testCreateForwardsTheRunTimeDestinationPath(): void {
+		$this->runService->expects(self::once())
+			->method('startRun')
+			->with(3, ['title' => 'Release', 'destinationPath' => '/Shared/Reports'])
+			->willReturn($this->makeRun());
+
+		$response = $this->controller([
+			'templateId' => '3',
+			'title' => 'Release',
+			'destinationPath' => '/Shared/Reports',
+		])->create();
+
+		self::assertSame(201, $response->getStatus());
+	}
+
 	public function testShowReturnsDetail(): void {
 		$run = $this->makeRun();
 		$section = $this->section(10, $run->getId());
@@ -136,6 +151,8 @@ class RunControllerTest extends TestCase {
 				]],
 				'progress' => $progress,
 				'permissions' => $permissions,
+				'evidenceDegraded' => false,
+				'managedFolderState' => 'available',
 			]);
 
 		$response = $this->controller(['id' => '1'])->show();
@@ -144,6 +161,8 @@ class RunControllerTest extends TestCase {
 		self::assertSame($progress, $response->getData()['progress']);
 		self::assertSame('Step', $response->getData()['sections'][0]['steps'][0]['title']);
 		self::assertSame([], $response->getData()['sections'][0]['reason']);
+		self::assertFalse($response->getData()['evidenceDegraded']);
+		self::assertSame('available', $response->getData()['managedFolderState']);
 	}
 
 	public function testCompleteReturnsCompletedRun(): void {

@@ -20,6 +20,12 @@ class AdminSettingsTest extends TestCase {
 	/** @var IGroupManager&MockObject */
 	private IGroupManager $groupManager;
 
+	// Fault injection for the persistence back end (#47 atomicity tests).
+	private int $setStringCalls = 0;
+	private int $deleteKeyCalls = 0;
+	private ?int $failSetStringOn = null;
+	private ?int $failDeleteKeyOn = null;
+
 	protected function setUp(): void {
 		$this->values = [];
 		$this->groups = ['engineering', 'operations'];
@@ -27,6 +33,17 @@ class AdminSettingsTest extends TestCase {
 		$this->groupManager->method('groupExists')->willReturnCallback(
 			fn (string $gid): bool => in_array($gid, $this->groups, true),
 		);
+		$this->resetFaults();
+	}
+
+	/**
+	 * Clear the fault-injection counters.
+	 */
+	private function resetFaults(): void {
+		$this->setStringCalls = 0;
+		$this->deleteKeyCalls = 0;
+		$this->failSetStringOn = null;
+		$this->failDeleteKeyOn = null;
 	}
 
 	private function settings(): AdminSettings {
@@ -45,6 +62,10 @@ class AdminSettingsTest extends TestCase {
 			fn (string $app, string $key, array $default = [], bool $lazy = false): array => is_array($this->values[$key] ?? null) ? $this->values[$key] : $default,
 		);
 		$config->method('setValueString')->willReturnCallback(function (string $app, string $key, string $value): bool {
+			$this->setStringCalls++;
+			if ($this->failSetStringOn !== null && $this->setStringCalls === $this->failSetStringOn) {
+				throw new \RuntimeException('injected setValueString failure');
+			}
 			$this->values[$key] = $value;
 
 			return true;
@@ -63,6 +84,16 @@ class AdminSettingsTest extends TestCase {
 			$this->values[$key] = $value;
 
 			return true;
+		});
+		$config->method('hasKey')->willReturnCallback(
+			fn (string $app, string $key, ?bool $lazy = false): bool => array_key_exists($key, $this->values),
+		);
+		$config->method('deleteKey')->willReturnCallback(function (string $app, string $key): void {
+			$this->deleteKeyCalls++;
+			if ($this->failDeleteKeyOn !== null && $this->deleteKeyCalls === $this->failDeleteKeyOn) {
+				throw new \RuntimeException('injected deleteKey failure');
+			}
+			unset($this->values[$key]);
 		});
 
 		return new AdminSettings($config, $this->groupManager);
@@ -246,11 +277,315 @@ class AdminSettingsTest extends TestCase {
 		$this->settings()->update($this->payload(['commentsEnabled' => 'yes']));
 	}
 
+	public function testDestinationIsUnsetByDefault(): void {
+		$settings = $this->settings();
+
+		self::assertNull($settings->getDestinationReference());
+		self::assertSame(
+			['configured' => false, 'valid' => false, 'path' => null, 'configuredBy' => null],
+			$settings->describeDestination(),
+		);
+	}
+
+	public function testDestinationSaveAndReadBack(): void {
+		$settings = $this->settings();
+
+		$reference = $settings->saveDestinationReference('home::admin', 4242, '/Shared/Reports', 'admin');
+		self::assertSame('home::admin', $reference->storageId);
+		self::assertSame(4242, $reference->fileId);
+		self::assertSame('/Shared/Reports', $reference->path);
+		self::assertSame('admin', $reference->configuredBy);
+
+		$stored = $settings->getDestinationReference();
+		self::assertNotNull($stored);
+		self::assertSame('home::admin', $stored->storageId);
+		self::assertSame(4242, $stored->fileId);
+		self::assertSame('/Shared/Reports', $stored->path);
+		self::assertSame('admin', $stored->configuredBy);
+
+		$described = $settings->describeDestination();
+		self::assertTrue($described['configured']);
+		self::assertTrue($described['valid']);
+		self::assertSame('/Shared/Reports', $described['path']);
+		self::assertSame('admin', $described['configuredBy']);
+	}
+
+	public function testDestinationDescriptionNeverExposesIdentity(): void {
+		$settings = $this->settings();
+		$settings->saveDestinationReference('home::admin', 4242, '/Shared', 'admin');
+
+		$described = $settings->describeDestination();
+		self::assertArrayNotHasKey('storageId', $described);
+		self::assertArrayNotHasKey('fileId', $described);
+	}
+
+	public function testDestinationClearRestoresUnsetState(): void {
+		$settings = $this->settings();
+		$settings->saveDestinationReference('home::admin', 4242, '/Shared', 'admin');
+
+		$settings->clearDestinationReference();
+
+		self::assertNull($settings->getDestinationReference());
+		self::assertFalse($settings->describeDestination()['configured']);
+	}
+
+	public function testPartialDestinationIsInvalidNotUnset(): void {
+		$this->values[AdminSettings::KEY_DESTINATION_FILE_ID] = 4242;
+		$settings = $this->settings();
+
+		$described = $settings->describeDestination();
+		self::assertTrue($described['configured'], 'a partial reference is configured, not unset');
+		self::assertFalse($described['valid']);
+
+		$this->expectException(ValidationException::class);
+		$settings->getDestinationReference();
+	}
+
+	public function testIncompleteDestinationCannotBeSaved(): void {
+		$this->expectException(ValidationException::class);
+		$this->settings()->saveDestinationReference('', 0, null, '');
+	}
+
+	public function testPathOnlyDestinationIsInvalid(): void {
+		$this->values[AdminSettings::KEY_DESTINATION_PATH] = '/Shared';
+		$settings = $this->settings();
+
+		$described = $settings->describeDestination();
+		self::assertTrue($described['configured'], 'a path without identity is a corrupted reference, not unset');
+		self::assertFalse($described['valid']);
+	}
+
+	public function testSavingReplacesPreviousReferenceAsOneLogicalOperation(): void {
+		$settings = $this->settings();
+		$settings->saveDestinationReference('home::a', 1, '/A', 'admin-a');
+		$settings->saveDestinationReference('home::b', 2, '/B', 'admin-b');
+
+		$stored = $settings->getDestinationReference();
+		self::assertNotNull($stored);
+		self::assertSame('home::b', $stored->storageId);
+		self::assertSame(2, $stored->fileId);
+		self::assertSame('/B', $stored->path);
+		self::assertSame('admin-b', $stored->configuredBy);
+
+		self::assertArrayHasKey(AdminSettings::KEY_DESTINATION_REFERENCE, $this->values);
+		$this->assertNoLegacyKeys();
+		self::assertSame(
+			['v' => 1, 'storageId' => 'home::b', 'fileId' => 2, 'path' => '/B', 'configuredBy' => 'admin-b'],
+			json_decode($this->storedReferenceValue(), true, 512, JSON_THROW_ON_ERROR),
+		);
+	}
+
+	public function testReferenceIsStoredAsOneCompleteValue(): void {
+		$settings = $this->settings();
+		$settings->saveDestinationReference('home::a', 1, '/A', 'admin-a');
+
+		$decoded = json_decode($this->storedReferenceValue(), true, 512, JSON_THROW_ON_ERROR);
+		self::assertSame(1, $decoded['v']);
+		self::assertSame('home::a', $decoded['storageId']);
+		self::assertSame(1, $decoded['fileId']);
+		self::assertSame('/A', $decoded['path']);
+		self::assertSame('admin-a', $decoded['configuredBy']);
+	}
+
+	public function testSaveFailureLeavesPreviousReferenceIntact(): void {
+		$settings = $this->settings();
+		$settings->saveDestinationReference('home::a', 1, '/A', 'admin-a');
+
+		$this->resetFaults();
+		$this->failSetStringOn = 1;
+		try {
+			$settings->saveDestinationReference('home::b', 2, '/B', 'admin-b');
+			self::fail('expected the write failure to abort the save');
+		} catch (\RuntimeException) {
+		}
+
+		$stored = $settings->getDestinationReference();
+		self::assertNotNull($stored);
+		self::assertSame('home::a', $stored->storageId);
+		self::assertSame(1, $stored->fileId);
+	}
+
+	public function testSaveFailureDuringLegacyMigrationLeavesLegacyIntact(): void {
+		$this->setLegacyValues('home::legacy', 11, '/Legacy', 'admin-legacy');
+		$settings = $this->settings();
+
+		$this->resetFaults();
+		$this->failSetStringOn = 1;
+		try {
+			$settings->saveDestinationReference('home::new', 22, '/New', 'admin-new');
+			self::fail('expected the migration write failure to abort the save');
+		} catch (\RuntimeException) {
+		}
+
+		$stored = $settings->getDestinationReference();
+		self::assertNotNull($stored);
+		self::assertSame('home::legacy', $stored->storageId);
+		self::assertSame(11, $stored->fileId);
+		self::assertArrayHasKey(AdminSettings::KEY_DESTINATION_STORAGE_ID, $this->values, 'legacy keys were not deleted before the failing write');
+	}
+
+	public function testSaveFailureDuringLegacyCleanupLeavesOldReference(): void {
+		$this->setLegacyValues('home::legacy', 11, '/Legacy', 'admin-legacy');
+		$settings = $this->settings();
+
+		$this->resetFaults();
+		$this->failDeleteKeyOn = 1;
+		try {
+			$settings->saveDestinationReference('home::new', 22, '/New', 'admin-new');
+			self::fail('expected the cleanup failure to abort the save');
+		} catch (\RuntimeException) {
+		}
+
+		$stored = $settings->getDestinationReference();
+		self::assertNotNull($stored);
+		self::assertSame('home::legacy', $stored->storageId);
+		self::assertSame(11, $stored->fileId);
+	}
+
+	public function testClearFailureLeavesPreviousReferenceIntact(): void {
+		$settings = $this->settings();
+		$settings->saveDestinationReference('home::a', 1, '/A', 'admin-a');
+
+		$this->resetFaults();
+		$this->failDeleteKeyOn = 1;
+		try {
+			$settings->clearDestinationReference();
+			self::fail('expected the delete failure to abort the clear');
+		} catch (\RuntimeException) {
+		}
+
+		$stored = $settings->getDestinationReference();
+		self::assertNotNull($stored);
+		self::assertSame('home::a', $stored->storageId);
+		self::assertSame(1, $stored->fileId);
+	}
+
+	public function testCompleteLegacyReferenceIsReadAndMigratedOnSave(): void {
+		$this->setLegacyValues('home::legacy', 11, '/Legacy', 'admin-legacy');
+		$settings = $this->settings();
+
+		$legacy = $settings->getDestinationReference();
+		self::assertNotNull($legacy);
+		self::assertSame('home::legacy', $legacy->storageId);
+		self::assertSame(11, $legacy->fileId);
+
+		$settings->saveDestinationReference('home::new', 22, '/New', 'admin-new');
+
+		$stored = $settings->getDestinationReference();
+		self::assertNotNull($stored);
+		self::assertSame('home::new', $stored->storageId);
+		self::assertSame(22, $stored->fileId);
+		$this->assertNoLegacyKeys();
+	}
+
+	public function testClearRemovesCompleteLegacyReference(): void {
+		$this->setLegacyValues('home::legacy', 11, '/Legacy', 'admin-legacy');
+		$settings = $this->settings();
+
+		$settings->clearDestinationReference();
+
+		self::assertNull($settings->getDestinationReference());
+		self::assertFalse($settings->describeDestination()['configured']);
+		$this->assertNoLegacyKeys();
+	}
+
+	public function testMalformedNewFormatIsInvalidAndNeverFallsBackToLegacy(): void {
+		$this->setLegacyValues('home::legacy', 11, '/Legacy', 'admin-legacy');
+		$this->values[AdminSettings::KEY_DESTINATION_REFERENCE] = '{not valid json';
+		$settings = $this->settings();
+
+		$described = $settings->describeDestination();
+		self::assertTrue($described['configured']);
+		self::assertFalse($described['valid']);
+
+		$this->expectException(ValidationException::class);
+		$settings->getDestinationReference();
+	}
+
+	public function testConflictingCompleteLegacyAndNewIsInvalid(): void {
+		$this->setLegacyValues('home::legacy', 11, '/Legacy', 'admin-legacy');
+		$this->values[AdminSettings::KEY_DESTINATION_REFERENCE] = json_encode([
+			'v' => 1,
+			'storageId' => 'home::new',
+			'fileId' => 22,
+			'path' => '/New',
+			'configuredBy' => 'admin-new',
+		], JSON_THROW_ON_ERROR);
+		$settings = $this->settings();
+
+		$described = $settings->describeDestination();
+		self::assertTrue($described['configured']);
+		self::assertFalse($described['valid']);
+
+		$this->expectException(ValidationException::class);
+		$settings->getDestinationReference();
+	}
+
+	public function testConsistentCompleteLegacyAndNewIsReadable(): void {
+		$this->setLegacyValues('home::same', 7, '/Same', 'admin');
+		$this->values[AdminSettings::KEY_DESTINATION_REFERENCE] = json_encode([
+			'v' => 1,
+			'storageId' => 'home::same',
+			'fileId' => 7,
+			'path' => '/Same',
+			'configuredBy' => 'admin',
+		], JSON_THROW_ON_ERROR);
+		$settings = $this->settings();
+
+		$stored = $settings->getDestinationReference();
+		self::assertNotNull($stored);
+		self::assertSame('home::same', $stored->storageId);
+		self::assertSame(7, $stored->fileId);
+	}
+
+	public function testPartialLegacyResidueIsIgnoredWhenNewReferenceIsValid(): void {
+		$this->values[AdminSettings::KEY_DESTINATION_REFERENCE] = json_encode([
+			'v' => 1,
+			'storageId' => 'home::new',
+			'fileId' => 22,
+			'path' => '/New',
+			'configuredBy' => 'admin-new',
+		], JSON_THROW_ON_ERROR);
+		$this->values[AdminSettings::KEY_DESTINATION_FILE_ID] = 999;
+		$settings = $this->settings();
+
+		$stored = $settings->getDestinationReference();
+		self::assertNotNull($stored);
+		self::assertSame('home::new', $stored->storageId);
+		self::assertSame(22, $stored->fileId);
+	}
+
 	/**
 	 * @param array<string, mixed> $overrides
 	 * @return array<string, mixed>
 	 */
 	private function payload(array $overrides): array {
 		return array_merge($this->settings()->getDefaults(), $overrides);
+	}
+
+	private function setLegacyValues(string $storageId, int $fileId, string $path, string $configuredBy): void {
+		$this->values[AdminSettings::KEY_DESTINATION_STORAGE_ID] = $storageId;
+		$this->values[AdminSettings::KEY_DESTINATION_FILE_ID] = $fileId;
+		$this->values[AdminSettings::KEY_DESTINATION_PATH] = $path;
+		$this->values[AdminSettings::KEY_DESTINATION_CONFIGURED_BY] = $configuredBy;
+	}
+
+	private function storedReferenceValue(): string {
+		self::assertArrayHasKey(AdminSettings::KEY_DESTINATION_REFERENCE, $this->values);
+		$value = $this->values[AdminSettings::KEY_DESTINATION_REFERENCE];
+		self::assertIsString($value);
+
+		return $value;
+	}
+
+	private function assertNoLegacyKeys(): void {
+		foreach ([
+			AdminSettings::KEY_DESTINATION_STORAGE_ID,
+			AdminSettings::KEY_DESTINATION_FILE_ID,
+			AdminSettings::KEY_DESTINATION_PATH,
+			AdminSettings::KEY_DESTINATION_CONFIGURED_BY,
+		] as $key) {
+			self::assertArrayNotHasKey($key, $this->values);
+		}
 	}
 }

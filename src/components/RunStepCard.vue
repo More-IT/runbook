@@ -7,6 +7,7 @@
 import type { RunAttachment, RunStep, RunStepStatus, StepAssignmentPayload, StepResponse } from '../models/run.ts'
 import type { Principal, StepType } from '../models/template.ts'
 
+import { FilePickerClosed, FilePickerType, getFilePickerBuilder } from '@nextcloud/dialogs'
 import { translate as t } from '@nextcloud/l10n'
 import { computed, ref, watch } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
@@ -16,7 +17,9 @@ import NcTextArea from '@nextcloud/vue/components/NcTextArea'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
 import { attachmentDownloadUrl } from '../services/runs.ts'
 import { searchPrincipals } from '../services/templates.ts'
-import { canCompleteStep, canRemoveEvidence, missingRequiredFileEvidence } from '../utils/runEvidence.ts'
+import { apiErrorMessage } from '../utils/apiError.ts'
+import { copyEvidenceHint, normalizeSourcePath } from '../utils/copyEvidence.ts'
+import { canCompleteStep, canRemoveEvidence, evidenceStateText, missingRequiredFileEvidence, usableEvidenceCount } from '../utils/runEvidence.ts'
 
 const props = defineProps<{
 	step: RunStep
@@ -40,6 +43,7 @@ const emit = defineEmits<{
 	return: [reason: string]
 	assign: [payload: StepAssignmentPayload]
 	uploadEvidence: [file: File]
+	copyEvidence: [sourcePath: string]
 	deleteEvidence: [id: number]
 }>()
 
@@ -56,6 +60,7 @@ const skipReason = ref('')
 const returnOpen = ref(false)
 const returnReason = ref('')
 const evidenceFile = ref<File | null>(null)
+const copyError = ref<string | null>(null)
 
 const assignOpen = ref(false)
 const assigneeValue = ref<Principal | null>(null)
@@ -84,9 +89,19 @@ const numberFieldLabel = computed<string>(() => unit.value === ''
 	: t('runbook', 'Response ({unit})', { unit: unit.value }))
 
 const isEditable = computed<boolean>(() => props.step.status === 'PENDING' || props.step.status === 'IN_PROGRESS')
-const canComplete = computed<boolean>(() => canCompleteStep(props.step.type, props.step.required, props.attachments.length))
-const missingEvidence = computed<boolean>(() => missingRequiredFileEvidence(props.step.type, props.step.required, props.attachments.length))
+const usableEvidence = computed<number>(() => usableEvidenceCount(props.attachments))
+const canComplete = computed<boolean>(() => canCompleteStep(props.step.type, props.step.required, usableEvidence.value))
+const missingEvidence = computed<boolean>(() => missingRequiredFileEvidence(props.step.type, props.step.required, usableEvidence.value))
 const isOverdue = computed<boolean>(() => isEditable.value && props.step.dueAt !== null && props.step.dueAt < Date.now() / 1000)
+
+/**
+ * Warning shown for evidence that is no longer present and in scope (#52).
+ *
+ * @param attachment Evidence attachment.
+ */
+function evidenceWarning(attachment: RunAttachment): string | null {
+	return evidenceStateText(t, attachment.fileState)
+}
 
 /**
  * Status class used for the theme-safe visual treatment.
@@ -316,7 +331,7 @@ function canDeleteEvidence(attachment: RunAttachment): boolean {
 		return false
 	}
 
-	return canRemoveEvidence(props.step.type, props.step.required, props.step.status, props.attachments.length)
+	return canRemoveEvidence(props.step.type, props.step.required, props.step.status, usableEvidence.value, attachment.fileState)
 }
 
 /**
@@ -338,6 +353,37 @@ function submitEvidence(): void {
 	}
 	emit('uploadEvidence', evidenceFile.value)
 	evidenceFile.value = null
+}
+
+/**
+ * Open the Nextcloud Files picker and attach a copy of the selected file
+ * (issue #53). Cancelling the picker changes nothing; the original file is never
+ * moved or modified. Only an advisory source path is emitted — the server
+ * resolves and authorises it.
+ */
+async function copyFromFiles(): Promise<void> {
+	copyError.value = null
+	let picked: unknown
+	try {
+		picked = await getFilePickerBuilder(t('runbook', 'Select a file to copy'))
+			.setMultiSelect(false)
+			.allowDirectories(false)
+			.setType(FilePickerType.Choose)
+			.build()
+			.pick()
+	} catch (caught) {
+		if (caught instanceof FilePickerClosed) {
+			return
+		}
+		copyError.value = apiErrorMessage(caught)
+		return
+	}
+
+	const path = normalizeSourcePath(picked)
+	if (path === null) {
+		return
+	}
+	emit('copyEvidence', path)
 }
 
 /**
@@ -397,6 +443,9 @@ function submitAssignment(): void {
 			<div v-for="attachment in attachments" :key="attachment.id" class="runbook-run-step__evidence-row">
 				<span class="runbook-run-step__evidence-name">{{ attachment.filename }}</span>
 				<span class="runbook-run-step__evidence-size">{{ formatFileSize(attachment.size) }}</span>
+				<span v-if="evidenceWarning(attachment)" class="runbook-run-step__evidence-state">
+					{{ evidenceWarning(attachment) }}
+				</span>
 				<NcButton :href="attachmentDownloadUrl(attachment.id)">
 					{{ t('runbook', 'Download') }}
 				</NcButton>
@@ -415,6 +464,15 @@ function submitAssignment(): void {
 			<NcButton :disabled="evidenceFile === null" @click="submitEvidence">
 				{{ t('runbook', 'Upload evidence') }}
 			</NcButton>
+			<NcButton @click="copyFromFiles">
+				{{ t('runbook', 'Attach a copy from Files') }}
+			</NcButton>
+			<p class="runbook-run-step__copy-hint">
+				{{ copyEvidenceHint(t) }}
+			</p>
+			<p v-if="copyError" class="runbook-run-step__copy-error" role="alert">
+				{{ copyError }}
+			</p>
 		</div>
 
 		<div v-if="canExecute && isEditable && runActive && step.type !== 'FILE'" class="runbook-run-step__response">
@@ -687,6 +745,11 @@ function submitAssignment(): void {
 	font-size: 0.85em;
 }
 
+.runbook-run-step__evidence-state {
+	color: var(--color-error, #c00);
+	font-size: 0.85em;
+}
+
 .runbook-run-step__upload {
 	display: flex;
 	flex-wrap: wrap;
@@ -697,6 +760,20 @@ function submitAssignment(): void {
 
 .runbook-run-step__file {
 	flex: 1 1 200px;
+}
+
+.runbook-run-step__copy-hint {
+	flex-basis: 100%;
+	margin: 0;
+	color: var(--color-text-maxcontrast, #555);
+	font-size: 0.85em;
+}
+
+.runbook-run-step__copy-error {
+	flex-basis: 100%;
+	margin: 0;
+	color: var(--color-error, #c00);
+	font-size: 0.85em;
 }
 
 .runbook-run-step__skip {

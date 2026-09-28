@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import type { AdminSettingsPayload, AdminSettingsValues, AppFeatures } from '../models/adminSettings.ts'
+import type { AdminDestinationState, AdminSettingsPayload, AdminSettingsValues, AppFeatures } from '../models/adminSettings.ts'
 
 import axios from '@nextcloud/axios'
 import { generateUrl } from '@nextcloud/router'
@@ -35,6 +35,30 @@ export async function saveAdminSettings(settings: AdminSettingsValues): Promise<
 	const { data } = await axios.put<AdminSettingsPayload>(endpoint('/admin/settings'), settings)
 
 	return data
+}
+
+/**
+ * Save the global administration destination folder (issue #47).
+ *
+ * The path is a locator from the administrator's own Files; identity is
+ * captured server-side. A failed save leaves the stored reference unchanged.
+ *
+ * @param path User-visible folder path selected in the administrator's Files.
+ */
+export async function saveAdminDestination(path: string): Promise<AdminDestinationState> {
+	const { data } = await axios.put<{ destination: AdminDestinationState }>(endpoint('/admin/settings/destination'), { path })
+
+	return data.destination
+}
+
+/**
+ * Clear the global administration destination folder (issue #47), restoring the
+ * default `Files/Runbook` behaviour.
+ */
+export async function clearAdminDestination(): Promise<AdminDestinationState> {
+	const { data } = await axios.delete<{ destination: AdminDestinationState }>(endpoint('/admin/settings/destination'))
+
+	return data.destination
 }
 
 /**

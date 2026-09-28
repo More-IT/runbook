@@ -27,9 +27,24 @@ export interface AdminSettingsBounds {
 	maxRetentionDays: number
 }
 
+/**
+ * Global administration destination folder state (issue #47).
+ *
+ * `configured` = a reference is stored; `valid` = the stored reference is
+ * complete. Identity (storage id / file id) is never exposed to the browser;
+ * `path` is advisory display text only.
+ */
+export interface AdminDestinationState {
+	configured: boolean
+	valid: boolean
+	path: string | null
+	configuredBy: string | null
+}
+
 export interface AdminSettingsPayload {
 	settings: AdminSettingsValues
 	bounds: AdminSettingsBounds
+	destination?: AdminDestinationState
 }
 
 export interface AppFeatures {

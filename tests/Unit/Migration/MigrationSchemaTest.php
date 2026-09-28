@@ -12,6 +12,12 @@ use OCA\Runbook\Migration\Version0005Date20260501000000;
 use OCA\Runbook\Migration\Version0006Date20260601000000;
 use OCA\Runbook\Migration\Version0007Date20260701000000;
 use OCA\Runbook\Migration\Version0008Date20260801000000;
+use OCA\Runbook\Migration\Version0009Date20260901000000;
+use OCA\Runbook\Migration\Version0010Date20260902000000;
+use OCA\Runbook\Migration\Version0011Date20260903000000;
+use OCA\Runbook\Migration\Version0012Date20260904000000;
+use OCA\Runbook\Migration\Version0013Date20260905000000;
+use OCA\Runbook\Migration\Version0014Date20260906000000;
 use OCA\Runbook\Tests\Support\FakeSchemaWrapper;
 use OCA\Runbook\Tests\Support\FakeTable;
 use OCP\DB\ISchemaWrapper;
@@ -40,6 +46,12 @@ class MigrationSchemaTest extends TestCase {
 		Version0006Date20260601000000::class,
 		Version0007Date20260701000000::class,
 		Version0008Date20260801000000::class,
+		Version0009Date20260901000000::class,
+		Version0010Date20260902000000::class,
+		Version0011Date20260903000000::class,
+		Version0012Date20260904000000::class,
+		Version0013Date20260905000000::class,
+		Version0014Date20260906000000::class,
 	];
 
 	/** @var IOutput&MockObject */
@@ -119,6 +131,7 @@ class MigrationSchemaTest extends TestCase {
 			'runbook_attachments',
 			'runbook_activity',
 			'runbook_notification_deliveries',
+			'runbook_files_cleanup',
 		] as $table) {
 			self::assertTrue($schema->hasTable($table), 'Missing table ' . $table);
 		}
@@ -262,6 +275,113 @@ class MigrationSchemaTest extends TestCase {
 		self::assertSame($indexesBefore, array_map(static fn (FakeTable $table): int => count($table->recordedIndexes()), $this->recordedTables($schema)));
 	}
 
+	public function testRunDestinationColumnsAreAdded(): void {
+		$schema = new FakeSchemaWrapper();
+		$this->applyAll($schema);
+		$runs = $this->table($schema, 'runbook_runs');
+
+		$columns = [
+			'destination_view_uid', 'destination_source', 'destination_storage_id',
+			'destination_file_id', 'destination_path', 'destination_storage_root_id',
+			'destination_mount_type', 'destination_mount_provider',
+			'destination_mount_id', 'destination_numeric_storage_id',
+			'destination_configured_by',
+			'run_folder_file_id', 'run_folder_storage_id', 'run_folder_path',
+			'run_folder_storage_root_id', 'run_folder_mount_type',
+			'run_folder_mount_provider', 'run_folder_mount_id',
+			'run_folder_numeric_storage_id',
+		];
+		foreach ($columns as $column) {
+			self::assertTrue($runs->hasColumn($column), 'Missing destination column ' . $column);
+			self::assertFalse($runs->recordedColumns()[$column]['options']['notnull'], $column . ' must be nullable');
+			self::assertNull($runs->recordedColumns()[$column]['options']['default'], $column . ' must default to null');
+		}
+	}
+
+	public function testTemplateDestinationColumnsAreAdded(): void {
+		$schema = new FakeSchemaWrapper();
+		$this->applyAll($schema);
+		$templates = $this->table($schema, 'runbook_templates');
+
+		foreach ([
+			'destination_storage_id',
+			'destination_file_id',
+			'destination_path',
+			'destination_configured_by',
+		] as $column) {
+			self::assertTrue($templates->hasColumn($column), 'Missing template destination column ' . $column);
+			self::assertFalse($templates->recordedColumns()[$column]['options']['notnull'], $column . ' must be nullable');
+			self::assertNull($templates->recordedColumns()[$column]['options']['default'], $column . ' must default to null');
+		}
+	}
+
+	public function testAttachmentFilesIdentityColumnsAreAdded(): void {
+		$schema = new FakeSchemaWrapper();
+		$this->applyAll($schema);
+		$attachments = $this->table($schema, 'runbook_attachments');
+
+		foreach ([
+			'file_id', 'storage_id', 'storage_root_id', 'mount_type',
+			'mount_provider', 'mount_id', 'numeric_storage_id', 'path',
+		] as $column) {
+			self::assertTrue($attachments->hasColumn($column), 'Missing attachment column ' . $column);
+			self::assertFalse($attachments->recordedColumns()[$column]['options']['notnull'], $column . ' must be nullable');
+			self::assertNull($attachments->recordedColumns()[$column]['options']['default'], $column . ' must default to null');
+		}
+
+		self::assertTrue($attachments->hasColumn('storage_kind'));
+		$kind = $attachments->recordedColumns()['storage_kind'];
+		self::assertSame('appdata', $kind['options']['default'], 'existing rows default to appdata');
+		self::assertTrue($attachments->hasIndex('runbook_attachments_file_idx'));
+	}
+
+	public function testFilesCleanupTableHasIdentityAndStatus(): void {
+		$schema = new FakeSchemaWrapper();
+		$this->applyAll($schema);
+		$cleanup = $this->table($schema, 'runbook_files_cleanup');
+
+		self::assertSame(['id'], $cleanup->recordedPrimaryKey());
+
+		$columns = $cleanup->recordedColumns();
+		foreach (['kind', 'status', 'view_uid', 'storage_id', 'file_id', 'storage_root_id', 'mount_type', 'mount_provider', 'mount_id', 'numeric_storage_id', 'path', 'reason', 'attempts', 'last_attempt_at', 'created_at'] as $column) {
+			self::assertTrue($cleanup->hasColumn($column), 'Missing cleanup column ' . $column);
+		}
+
+		// The identity is authoritative and never nullable.
+		self::assertTrue($columns['view_uid']['options']['notnull']);
+		self::assertTrue($columns['storage_id']['options']['notnull']);
+		self::assertTrue($columns['file_id']['options']['notnull']);
+		// Defaults for a fresh record.
+		self::assertSame('pending', $columns['status']['options']['default']);
+		self::assertSame(0, $columns['attempts']['options']['default']);
+		// Descriptor/audit fields are nullable.
+		self::assertFalse($columns['reason']['options']['notnull']);
+		self::assertFalse($columns['last_attempt_at']['options']['notnull']);
+		self::assertFalse($columns['path']['options']['notnull']);
+
+		self::assertTrue($cleanup->hasIndex('runbook_files_cleanup_status_idx'));
+	}
+
+	public function testLegacyMigrationStateColumnsAreAdded(): void {
+		$schema = new FakeSchemaWrapper();
+		$this->applyAll($schema);
+
+		$runs = $this->table($schema, 'runbook_runs');
+		foreach (['destination_migrated_at', 'migration_state', 'migration_reason', 'migration_attempted_at'] as $column) {
+			self::assertTrue($runs->hasColumn($column), 'Missing run column ' . $column);
+			self::assertFalse($runs->recordedColumns()[$column]['options']['notnull'], $column . ' must be nullable');
+			self::assertNull($runs->recordedColumns()[$column]['options']['default'], $column . ' must default to null');
+		}
+		self::assertTrue($runs->hasIndex('runbook_runs_migration_idx'));
+
+		$attachments = $this->table($schema, 'runbook_attachments');
+		foreach (['migration_state', 'migration_reason'] as $column) {
+			self::assertTrue($attachments->hasColumn($column), 'Missing attachment column ' . $column);
+			self::assertFalse($attachments->recordedColumns()[$column]['options']['notnull'], $column . ' must be nullable');
+			self::assertNull($attachments->recordedColumns()[$column]['options']['default'], $column . ' must default to null');
+		}
+	}
+
 	public function testGuardedMigrationsReturnNullWhenAlreadyApplied(): void {
 		$schema = new FakeSchemaWrapper();
 		$this->applyAll($schema);
@@ -271,6 +391,12 @@ class MigrationSchemaTest extends TestCase {
 			new Version0006Date20260601000000(),
 			new Version0007Date20260701000000(),
 			new Version0008Date20260801000000(),
+			new Version0009Date20260901000000(),
+			new Version0010Date20260902000000(),
+			new Version0011Date20260903000000(),
+			new Version0012Date20260904000000(),
+			new Version0013Date20260905000000(),
+			new Version0014Date20260906000000(),
 		];
 		foreach ($alreadyGuarded as $migration) {
 			self::assertNull($migration->changeSchema($this->output, static fn (): ISchemaWrapper => $schema, []));
@@ -298,6 +424,12 @@ class MigrationSchemaTest extends TestCase {
 			Version0006Date20260601000000::class,
 			Version0007Date20260701000000::class,
 			Version0008Date20260801000000::class,
+			Version0009Date20260901000000::class,
+			Version0010Date20260902000000::class,
+			Version0011Date20260903000000::class,
+			Version0012Date20260904000000::class,
+			Version0013Date20260905000000::class,
+			Version0014Date20260906000000::class,
 		]);
 	}
 }

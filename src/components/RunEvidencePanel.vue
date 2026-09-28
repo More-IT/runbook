@@ -9,6 +9,7 @@ import type { RunAttachment } from '../models/run.ts'
 import { translate as t } from '@nextcloud/l10n'
 import NcButton from '@nextcloud/vue/components/NcButton'
 import { attachmentDownloadUrl } from '../services/runs.ts'
+import { evidenceStateText } from '../utils/runEvidence.ts'
 
 const props = defineProps<{
 	attachments: RunAttachment[]
@@ -64,6 +65,15 @@ function canDelete(attachment: RunAttachment): boolean {
 function stepTitle(stepId: number): string {
 	return props.stepTitles[stepId] ?? t('runbook', 'Step {id}', { id: stepId })
 }
+
+/**
+ * Warning shown for evidence that is no longer present and in scope (#52).
+ *
+ * @param attachment Evidence attachment.
+ */
+function evidenceWarning(attachment: RunAttachment): string | null {
+	return evidenceStateText(t, attachment.fileState)
+}
 </script>
 
 <template>
@@ -85,6 +95,9 @@ function stepTitle(stepId: number): string {
 					{{ attachment.uploaderUid }}
 					·
 					{{ formatDate(attachment.createdAt) }}
+				</span>
+				<span v-if="evidenceWarning(attachment)" class="runbook-evidence__state">
+					{{ evidenceWarning(attachment) }}
 				</span>
 			</div>
 			<NcButton :href="attachmentDownloadUrl(attachment.id)">
@@ -131,6 +144,11 @@ function stepTitle(stepId: number): string {
 
 .runbook-evidence__meta {
 	color: var(--color-text-maxcontrast, #555);
+	font-size: 0.85em;
+}
+
+.runbook-evidence__state {
+	color: var(--color-error, #c00);
 	font-size: 0.85em;
 }
 </style>

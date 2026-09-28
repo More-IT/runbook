@@ -9,15 +9,19 @@ developer tooling needed to build, lint, analyse and test the code base.
 It includes the feature milestones **0–7** (foundation, templates, access
 control, runs/execution, work/assignments/due dates, collaboration/evidence/
 activity, Nextcloud integrations and administration settings), the production
-fix releases **0.1.1**, **0.2.0** and **0.3.0**, and the **0.4.0 UX redesign and
-template import/export** work (issues #26–#33).
+fix releases **0.1.1**, **0.2.0** and **0.3.0**, the **0.4.0 UX redesign and
+template import/export** work (issues #26–#33), and the **0.5.0 Nextcloud Files
+integration** (issues #45–#56).
 
 > The numbered **"Milestone N"** labels used below are feature milestones and are
-> **not** the release version. The application version is **0.4.0**
-> (`appinfo/info.xml`) as a **release candidate packaged for manual acceptance**:
-> it is **not** a published, production-verified release and has not been uploaded
-> or deployed anywhere. The 0.4.0 UX and import/export work is code-complete and
-> awaits the real-Nextcloud acceptance run.
+> **not** the release version. The application version is **0.5.0**
+> (`appinfo/info.xml`) as a **release candidate prepared for manual acceptance**:
+> it is **not** a published, production-verified release and has not been deployed
+> to or accepted on any real Nextcloud instance. The 0.4.0 UX/import–export work
+> and the 0.5.0 Nextcloud Files integration (destination precedence, Files-backed
+> evidence, reconciliation, fail-closed deletion/cleanup and legacy AppData
+> migration) are code-complete and await the real-Nextcloud acceptance run in
+> [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md).
 
 ## Feature set
 
@@ -68,8 +72,10 @@ Milestone 5 — Collaboration, evidence and activity:
 
 - Plain-text comments on runs and individual steps.
 - `@userid` mentions with validation against Nextcloud users.
-- Evidence attachments stored in Nextcloud AppData with a MIME allowlist and
-  size limit.
+- Evidence attachments stored in the run's managed Nextcloud Files folder (legacy
+  runs keep using AppData until migration) with a MIME allowlist and size limit.
+- Attach a copy of an existing Files item as evidence without changing the
+  original file.
 - An append-only activity history with a timeline in the run detail view.
 
 Milestone 6 — Nextcloud integrations:
@@ -129,8 +135,14 @@ Milestone 0.3.0 — Process flows and dependencies:
   source ACL are never copied.
 - Runs can be permanently deleted by the owner or a Nextcloud administrator in
   any state. Deletion removes the run, its sections, steps, ACL, activity,
-  comments, mentions and notification ledger rows, and deletes the stored
-  evidence files first so no orphaned files remain.
+  comments, mentions and notification ledger rows, and removes the tracked
+  evidence files. Deletion is **fail closed**: every tracked Files file is
+  pre-flighted on its own node, and if any file cannot be removed the whole
+  deletion aborts with `run_delete_blocked` and no row is changed. The cleanup
+  intent for the managed folder and the run-row deletion are written in one
+  transaction; the emptied folder itself is **preserved** (the public Files API
+  cannot delete it non-recursively) with a durable cleanup record (see "Evidence
+  attachments"). Legacy AppData evidence is removed as before.
 
 Milestone 0.4.0 — UX redesign and template import/export (issues #26–#33):
 
@@ -144,9 +156,9 @@ Milestone 0.4.0 — UX redesign and template import/export (issues #26–#33):
   and import (`POST .../templates/import`), with authoring-rule validation,
   transaction atomicity, a canonical 2 MB server limit and a 32 MB browser
   source-file guard (see "Template export" and "Template import" below).
-- This milestone is **packaged as the 0.4.0 release candidate for manual
-  acceptance**; it is not a published or production-verified release. The
-  acceptance checklist is
+- This milestone was prepared as the 0.4.0 release candidate for manual
+  acceptance; it is not a published or production-verified release and is now
+  superseded by the 0.5.0 release candidate. The acceptance checklist is
   [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md).
 
 > The interactive process-flow engine (issues #15–#21) is **implemented**:
@@ -155,8 +167,8 @@ Milestone 0.4.0 — UX redesign and template import/export (issues #26–#33):
 > below.
 
 > Template **export and import are implemented and hardened** (see "Template
-> export" and "Template import" below). The **0.4.0 release candidate** is
-> packaged for manual acceptance; the real-Nextcloud/browser acceptance checklist
+> export" and "Template import" below). The current **0.5.0 release candidate** is
+> prepared for manual acceptance; the real-Nextcloud/browser acceptance checklist
 > is in
 > [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md).
 > Automated checks and package validation are not a substitute for that manual
@@ -238,7 +250,7 @@ A run has its own access list with two assignable roles:
 appinfo/            App metadata (info.xml) and routes
 build/stubs/        PHPStan stubs for runtime-only Nextcloud dependencies
 css/                Generated stylesheet (build output)
-docs/               UX architecture and manual acceptance checklist
+docs/               UX architecture, folder/storage contract and manual acceptance checklist
 img/                App icon and static images
 js/                 Generated frontend bundle (build output)
 l10n/               Translation files
@@ -390,6 +402,8 @@ HTTP status code (`400`, `403`, `404`, `409`).
 | `POST` | `/apps/runbook/api/v1/templates/{id}/unarchive` | Restore an archived template |
 | `POST` | `/apps/runbook/api/v1/templates/{id}/duplicate` | Duplicate a template into a new draft |
 | `GET` | `/apps/runbook/api/v1/templates/{id}/export` | Export a template as portable JSON |
+| `PUT` | `/apps/runbook/api/v1/templates/{id}/destination` | Save the optional template destination folder reference (owner/editor) |
+| `DELETE` | `/apps/runbook/api/v1/templates/{id}/destination` | Clear the optional template destination folder reference (owner/editor) |
 | `POST` | `/apps/runbook/api/v1/templates/{id}/sections` | Add a section |
 | `PATCH` | `/apps/runbook/api/v1/sections/{id}` | Update a section |
 | `DELETE` | `/apps/runbook/api/v1/sections/{id}` | Delete a section |
@@ -407,7 +421,7 @@ HTTP status code (`400`, `403`, `404`, `409`).
 | `POST` | `/apps/runbook/api/v1/runs/{id}/complete` | Complete a run |
 | `POST` | `/apps/runbook/api/v1/runs/{id}/cancel` | Cancel a run |
 | `POST` | `/apps/runbook/api/v1/runs/{id}/reopen` | Reopen a completed run |
-| `DELETE` | `/apps/runbook/api/v1/runs/{id}` | Delete a run and its data (owner or administrator) |
+| `DELETE` | `/apps/runbook/api/v1/runs/{id}` | Delete a run and its data (owner or administrator); fails closed with `run_delete_blocked` when tracked evidence cannot be removed |
 | `POST` | `/apps/runbook/api/v1/run-steps/{id}/start` | Start a pending step |
 | `PATCH` | `/apps/runbook/api/v1/run-steps/{id}` | Store a step response and/or update its assignment |
 | `POST` | `/apps/runbook/api/v1/run-steps/{id}/complete` | Complete a step |
@@ -424,17 +438,30 @@ HTTP status code (`400`, `403`, `404`, `409`).
 | `POST` | `/apps/runbook/api/v1/runs/{id}/comments` | Add a comment (`body`, optional `stepId`) |
 | `PATCH` | `/apps/runbook/api/v1/comments/{id}` | Edit an own comment |
 | `DELETE` | `/apps/runbook/api/v1/comments/{id}` | Delete an own comment or any comment as owner |
-| `GET` | `/apps/runbook/api/v1/runs/{id}/attachments` | List evidence metadata of a run |
+| `GET` | `/apps/runbook/api/v1/runs/{id}/attachments` | List evidence metadata with reconciled `fileState` (`degraded` flag) |
 | `POST` | `/apps/runbook/api/v1/run-steps/{id}/attachments` | Upload evidence (`multipart/form-data`, field `file`) |
+| `POST` | `/apps/runbook/api/v1/run-steps/{id}/attachments/copy` | Attach a copy of an existing Files item (`sourcePath`); the original is left untouched |
 | `GET` | `/apps/runbook/api/v1/attachments/{id}` | Download evidence |
 | `DELETE` | `/apps/runbook/api/v1/attachments/{id}` | Delete evidence (uploader or owner; not the last file of a completed required FILE step) |
 | `GET` | `/apps/runbook/api/v1/runs/{id}/activity` | Activity history (`limit`), newest first |
 | `GET` | `/apps/runbook/api/v1/admin/settings` | Read administration settings (administrators only) |
 | `PUT` | `/apps/runbook/api/v1/admin/settings` | Save administration settings (administrators only) |
+| `PUT` | `/apps/runbook/api/v1/admin/settings/destination` | Save the global destination folder reference (administrators only) |
+| `DELETE` | `/apps/runbook/api/v1/admin/settings/destination` | Clear the global destination folder reference (administrators only) |
+| `GET` | `/apps/runbook/api/v1/admin/migration` | Legacy AppData migration status (administrators only) |
+| `POST` | `/apps/runbook/api/v1/admin/migration` | Run one legacy migration batch now and return the status (administrators only) |
 | `GET` | `/apps/runbook/api/v1/features` | Read-only feature flags for the current user |
 | `GET` | `/apps/runbook/api/status` | Foundation status endpoint |
 
 Reorder endpoints accept `{ "position": <zero-based index> }`.
+
+The run-start endpoint (`POST /apps/runbook/api/v1/templates/{id}/runs`) accepts
+`{ "title": …, "description"?: …, "dueAt"?: <unix seconds>|null }` and an optional
+one-time `destinationPath` (a user-visible path from the starter's own Files
+view, e.g. `/Shared/Reports`). When `destinationPath` is omitted or empty the
+destination is inherited (template → administration → default); when present it
+is captured server-side and is authoritative for that run only. Storage/file ids
+sent by the client are ignored.
 
 The ACL `PUT` endpoint replaces the complete ACL set:
 
@@ -672,13 +699,41 @@ rendered as HTML or Markdown.
 
 ## Evidence attachments
 
-Evidence is uploaded per run step and stored in Nextcloud AppData under an
-application-controlled path (`runs/{runId}/steps/{stepId}/evidence/{key}`). The
-database only stores metadata and a random storage key; storage paths and keys
-are never exposed through the API.
+New evidence is stored in **Nextcloud Files**, inside the run's managed folder
+(the per-run subfolder created when the run started). The attachment row records
+`storage_kind='files'` and the exact identity `(storage_id, file_id)` plus
+descriptive metadata and an advisory `path`; downloads and deletes resolve the
+file by that identity. Storage paths, file ids and mount ids are never exposed
+through the API.
 
+- Uploads resolve the run's managed folder in the **run owner's** view by exact
+  identity and verify the file is still inside it. If the folder is missing,
+  ambiguous or unwritable the upload **fails closed** (`destination_unavailable`):
+  the folder is never silently recreated and AppData is never used as a fallback.
+  Uploads use a unique physical name, and the reserved `.runbook-run.json`
+  ownership marker cannot be uploaded as evidence. Downloads resolve the tracked
+  file by identity and refuse a file that is outside the run-managed folder
+  (`attachment_out_of_scope`).
+- **New uploads never use AppData.** A **legacy run** (started before the Files
+  milestone, with no managed folder) fails closed (`destination_unavailable`)
+  until the #55 legacy migration; a partially populated or corrupt destination
+  identity is invalid (`destination_invalid_config`). Existing AppData
+  attachments remain readable and deletable (compatibility) until they are
+  individually migrated into Files by #55; new uploads never extend AppData.
+- **Legacy AppData migration (#55):** existing AppData evidence is copied into
+  the run-managed Files folder (destination precedence template →
+  administration → default `Files/Runbook`, resolved in the run owner's view),
+  verified by size + SHA-256, and the row is switched to `storage_kind='files'`
+  before the AppData source is deleted. Migration is resumable and idempotent;
+  failures keep the source and record a `blocked`/retryable reason. Administrators
+  can inspect or trigger it with `GET`/`POST /api/v1/admin/migration`.
 - Uploading requires permission to execute the step (owner or assigned user or
-  group) and an `ACTIVE` run.
+  group) and an `ACTIVE` run. The uploader does **not** need Files access to the
+  destination: Runbook writes server-side into the run owner's managed folder and
+  records the uploader. Downloads require Runbook run access (owner, participants,
+  step assignees and viewers); the downloader needs no Files access either. Only
+  the uploader or the run owner may delete evidence, and viewers cannot upload or
+  delete.
 - Uploads use the configurable evidence size limit (default 25 MiB,
   `AdminSettings::DEFAULT_MAX_ATTACHMENT_SIZE = 26214400` bytes). The MIME type
   is detected from the file content (client-provided types are ignored) against a
@@ -688,10 +743,46 @@ are never exposed through the API.
 - A `sha256` checksum, size, sanitized filename and uploader are stored. File
   names may not contain path separators, `..` or control characters and are
   limited to 255 characters.
+- **Out-of-band reconciliation (#52):** every listing, download, delete and FILE
+  completion recomputes each Files attachment's `file_state` in the run owner's
+  view: `present` (a rename/move inside the managed folder stays present and its
+  advisory path is refreshed), `missing` (file or managed folder deleted),
+  `out_of_scope` (moved outside the managed folder) or `unavailable` (moved to
+  another storage, ambiguous identity, or storage/mount error). Non-present
+  evidence is never usable for a new completion and never deleted with the run;
+  it is surfaced in the UI. The run detail reports `evidenceDegraded` and the
+  managed folder's availability (`managedFolderState`: `available` | `missing` |
+  `unavailable` | `not_applicable`), and the degraded notice is state-aware: a
+  replacement upload is only offered when the managed folder is still
+  available; a missing/unavailable folder reports that uploads are blocked until
+  repair (which is **not** implemented yet).
+- **Attach a copy from Files (#53):** an authorised run user (owner or step
+  assignee, `ACTIVE` run, available section) can pick an existing file in their
+  **own** Files and attach a **copy** to a step. The client sends only an
+  advisory `sourcePath`; the server resolves and verifies the source in the
+  acting user's view (exact `(storageId, fileId)`, `READ` permission), resolves
+  the managed folder in the **run owner's** view, copies the bytes under a safe
+  collision-free name and stores a normal Files-backed attachment. The original
+  is never moved, renamed, overwritten or deleted, and no AppData fallback is
+  used. Missing/unreadable/ambiguous sources and missing/unwritable destinations
+  fail closed without creating an attachment.
 - The uploader and the run owner may delete evidence while the run is active.
   Deleting metadata removes the stored file; a failed metadata write never leaves
   an orphan file behind. The last attachment of a **completed required `FILE`
   step** cannot be deleted: upload a replacement first, then delete the old file.
+- **Safe run deletion (#54):** deleting a run pre-flights every tracked,
+  in-scope Files file on its own node and fails closed (`run_delete_blocked`,
+  no database change) if any file cannot be removed; missing files are treated
+  as gone and out-of-scope files are never touched. Only once the files are gone
+  are a durable `runbook_files_cleanup` record (with the owner-resolved folder
+  identity) and the run-row deletion written in **one transaction**. The public
+  Files API only offers **recursive** folder deletion (`Folder::delete()`), which
+  cannot be made race-safe against a user writing into the folder, so Runbook
+  **never deletes the folder**: an existing folder is preserved and the record is
+  finalized `blocked` (`not_empty`, or `removal_unsupported` for an
+  empty/marker-only folder) for human review. An hourly retry job re-resolves by
+  `(view_uid, storage_id, file_id)` and closes the record only once the folder is
+  already gone; the base folder is never deleted.
 - Downloads require read access to the run.
 - `FILE` steps are resolved entirely through evidence; they never store a
   response value, file contents or storage paths. A **required** `FILE` step can
@@ -701,6 +792,140 @@ are never exposed through the API.
   clear error; an optional `FILE` step may be completed without evidence. After a
   successful upload the step's evidence list refreshes automatically and
   completion becomes available without a manual reload.
+
+> **0.5.0 storage direction (issues #45–#56).** New run attachments live in
+> Nextcloud Files, never in AppData, under a managed per-run subfolder with an
+> explicit destination-precedence model. The full contract (decision table,
+> folder tree and naming, persistent identity, lifecycle, authorization,
+> out-of-band changes, deletion/migration boundaries and the dependency map for
+> #46–#56) is in [`docs/folder-model.md`](docs/folder-model.md).
+>
+> Issue #46 is implemented: starting a run resolves the user's `Files/Runbook`
+> base folder, creates a per-run subfolder, writes a small ownership marker
+> (`.runbook-run.json`, containing the full run UUID), and persists the resolved
+> storage destination identity on the run row. The resolver reuses an existing
+> folder only when that marker is valid and its UUID matches the UUID being
+> resolved; a name match alone is never adopted (a missing/malformed/foreign
+> marker fails closed with `destination_ownership_conflict`). This is **per
+> UUID**: a same-UUID resolver retry may reuse an owned folder, but a normal
+> `startRun()` gets a fresh UUID, creates a *new* folder, and does **not** recover
+> a folder preserved by an earlier failed start. A failed start **preserves** the
+> folder that attempt created (with its owned marker and all content), because the
+> public Files API only offers recursive folder deletion that cannot be made
+> race-safe. The preserved folder is therefore an orphan requiring manual cleanup,
+> and its `(viewUid, storageId, fileId)` identity is logged to locate it. Existing
+> runs keep a null destination and behave exactly as before.
+>
+> Issue #47 is implemented: administrators can configure a **global destination
+> folder** in Runbook administration settings using the Nextcloud Files picker.
+> Only the selected user-visible path is submitted; the folder identity is
+> captured server-side from the administrator's own view and stored as a
+> reference (advisory path, configured-by). At run start the reference is
+> re-resolved in the **run owner's** view by exact `file_id` + `storage_id` and
+> frozen with `destination_source = admin` (`destination_configured_by`
+> recorded). A configured but missing, inaccessible, incomplete or unwritable
+> folder fails closed with no fallback; clearing the setting restores the #46
+> default.
+>
+> Issue #48 is implemented: a template **owner or editor** can optionally set a
+> destination folder in the template editor (select, replace, clear) using the
+> same Files picker. The template reference is stored on the template and is
+> captured server-side from the chooser's view; viewers and unauthorized users
+> cannot change it, and archived templates are read-only. An unset template falls
+> through, while a configured template destination is authoritative and fails
+> closed (no fallback) when it cannot be resolved in the run owner's view;
+> successful starts record `destination_source = template`.
+>
+> Issue #49 is implemented: the **Start run** dialog offers an optional one-time
+> destination folder (select, change, or “use inherited destination”). It is
+> request-scoped — the client submits only a user-visible `destinationPath` on
+> `POST /api/v1/templates/{id}/runs`; the identity is captured server-side from
+> the authenticated starter's own view and is never written back to the template
+> or administration setting. Precedence is now **run-time (#49) > template (#48)
+> > global administration (#47) > default `Files/Runbook` (#46)**: omitting the
+> path preserves the inherited behavior exactly, while an explicit run-time
+> choice is authoritative and fails closed (no fall-through) when it cannot be
+> resolved; successful starts record `destination_source = runtime`.
+>
+> Issue #50 is implemented: new run evidence is stored in **Nextcloud Files**
+> inside the run's managed folder (the subfolder created for that run), never in
+> AppData. The attachment row records `storage_kind='files'` and the exact
+> identity `(storage_id, file_id)` plus descriptive metadata and an advisory
+> `path`; uploads resolve the managed folder in the run owner's view and fail
+> closed (`destination_unavailable`) if it is missing or ambiguous — the folder
+> is never silently recreated and AppData is never used as a fallback. Uploads
+> use a unique physical name and the reserved `.runbook-run.json` ownership
+> marker cannot be uploaded as evidence; downloads and deletes resolve the file
+> by identity and verify it is still inside the run-managed folder. New uploads
+> never use AppData: a **legacy run** (started before the Files milestone, with
+> no managed folder) fails closed (`destination_unavailable`) until the #55
+> legacy migration, and a partially populated/corrupt destination identity is
+> invalid. Existing AppData evidence stays readable/deletable and is never
+> extended; #55 migrates it into Files.
+>
+> Issue #52 is implemented: tracked Files evidence is reconciled against the
+> run-managed scope on every listing, download, delete and FILE completion and
+> reported as `file_state` (`present`/`missing`/`out_of_scope`/`unavailable`).
+> Renames/moves inside the managed folder stay `present` (advisory path
+> refreshed); files moved outside it, deleted, moved to another storage, or whose
+> folder/storage is unavailable fail closed (no fallback, no silent folder
+> re-creation). A required FILE step can be newly completed only with `present`
+> evidence (`file_evidence_missing` otherwise); completed steps are never
+> rewritten and the run detail flags `evidenceDegraded`; the last `present`
+> attachment of a completed required FILE step stays protected. A **missing
+> evidence file** whose managed folder still exists can be replaced by uploading
+> a new file; a **missing managed folder** cannot receive uploads (fail closed
+> `destination_unavailable`, no silent recreation, frozen identity unchanged).
+> The run-level degraded notice uses the reconciled `file_state` values plus
+> `managedFolderState`, so it only offers a replacement upload when the managed
+> folder is actually available and never promises an upload that would fail
+> closed.
+>
+> Issue #53 is implemented: an authorised user can attach a **copy** of an
+> existing Files item to an eligible step. The browser sends only an advisory
+> `sourcePath`; the server resolves and authorises the source in the acting
+> user's own view, copies the bytes into the run-managed folder in the run
+> owner's view, and stores a normal Files-backed attachment. The original is
+> never moved, renamed, overwritten or deleted; missing/unreadable/ambiguous
+> sources and missing/unwritable destinations fail closed with no AppData
+> fallback.
+>
+> Issue #54 is implemented: run deletion is fail-closed for files. Every tracked
+> in-scope file is pre-flighted on its own node; a blocked file aborts the
+> deletion (`run_delete_blocked`) with the run and identities intact. The durable
+> `runbook_files_cleanup` record (owner-resolved folder identity) is written in the
+> same transaction as the run-row deletion. Because the public Files API only
+> offers recursive folder deletion, the folder is **not** deleted: an existing
+> folder is preserved and the record is finalized `blocked` for review, and the
+> hourly retry job closes the record only once the folder is already gone.
+> Untracked content, the base folder and original/source files are never deleted.
+> The explicit folder-repair action remains planned.
+>
+> Issue #55 is implemented: legacy AppData evidence is migrated into the
+> run-managed Files folder. The destination is resolved with the migration
+> precedence (template → administration → default `Files/Runbook`) in the run
+> owner's view and frozen on the run; a supplied but invalid/inaccessible level
+> blocks the run without fallback. Each attachment is copied under a
+> deterministic collision-free name, verified by size + SHA-256, switched to
+> `storage_kind='files'` with the owner-resolved identity, and only then is the
+> AppData source deleted. Migration is resumable and idempotent at run and
+> attachment level; any failure preserves the source and records a
+> `blocked`/`retryable` reason. Bounded batches use a durable **rotating keyset
+> cursor** over the ascending candidate run-id order, so later runs are reached
+> on subsequent batches even when earlier ones stay blocked and all
+> `migration_attempted_at` values are equal (the cursor guarantees every candidate
+> is selected within one rotation). The whole selection and processing is guarded
+> by an exclusive `ILockingProvider` lock (`runbook/legacy-migration`), so
+> overlapping batches across PHP workers cannot select or process the same runs;
+> a contended invocation returns `busy` without moving the cursor.
+> Administrators can inspect or trigger it with
+> `GET`/`POST /api/v1/admin/migration`; the hourly `LegacyMigrationJob` retries
+> pending runs. The status distinguishes the **active** AppData dependency
+> (`remainingAppDataAttachments`/`runs`) from **residual cleanup** of an already
+> verified Files copy whose AppData source could not be deleted
+> (`residualCleanupAttachments`/`cleanup`), which is retried automatically and
+> never blocks a completed migration. The milestone is not complete while any
+> active attachment is still `storage_kind='appdata'`.
 
 ## Activity history
 
@@ -866,11 +1091,29 @@ values fall back to the defaults listed below.
 | `notifications_enabled` | `true` | When disabled, event and due/overdue notifications are not delivered. |
 | `search_enabled` | `true` | When disabled, Unified Search returns no Runbook results. |
 | `retention_days` | `0` | Retention period in days (`0` = keep forever). **Configuration only:** Runbook does not delete runs automatically yet; enforcement belongs to a future milestone. |
+| `destination_reference` | unset | Global destination folder reference (issue #47). Stored as **one validated JSON value under a single key** (`{"v":1,"storageId":…,"fileId":…,"path":…,"configuredBy":…}`), so a save/clear is a single atomic write and a reader can never observe a mix of old and new fields. Unset = key absent. The stored `path` is advisory only; resolution uses the exact `fileId` + `storageId` re-resolved in the run owner's view. |
 
 Notes:
 
 - Only administrators may read or modify these settings; the endpoints are
   protected by the Nextcloud admin-only controller default and CSRF protection.
+- **Destination compatibility/migration (issue #47):** instances configured
+  before the atomic representation existed may still hold the deprecated
+  four-key form (`destination_storage_id`, `destination_file_id`,
+  `destination_path`, `destination_configured_by`). A complete legacy reference
+  is still read; a partial/malformed one fails closed
+  (`destination_invalid_config`). On the next save or clear the legacy value is
+  first copied into `destination_reference` (so a valid destination is never
+  observed as unset) and only then are the legacy keys removed; a failure aborts
+  the write and leaves the previous reference intact. A complete legacy
+  reference that disagrees with a present `destination_reference`, or a
+  malformed `destination_reference`, is treated as ambiguous/corrupt and fails
+  closed.
+- The global destination folder is chosen with the Nextcloud Files picker
+  (`@nextcloud/dialogs`). The browser only submits the selected user-visible
+  path; the server resolves it in the authenticated administrator's own view and
+  captures the identity there. `GET /api/v1/features` never exposes the
+  destination to ordinary users.
 - The template creation policy is always enforced server-side in
   `TemplateService`; the frontend only hides controls and never grants access.
 - Feature toggles are enforced server-side in the affected services
@@ -1033,7 +1276,8 @@ Translation workflow:
 - `lib/Service/CommentService.php` — run and step comment rules.
 - `lib/Service/MentionService.php` — `@userid` parsing and storage.
 - `lib/Service/AttachmentService.php` — evidence upload, download and deletion.
-- `lib/Service/EvidenceStorage.php` — AppData-backed evidence file storage.
+- `lib/Service/EvidenceStorage.php` — AppData evidence storage (read/delete of existing legacy attachments only).
+- `lib/Service/FilesAttachmentStorage.php` — Files-backed evidence storage inside the run-managed folder.
 - `lib/Service/ActivityService.php` — append-only activity recording and listing.
 - `lib/Service/NotificationService.php` — notification delivery and deduplication.
 - `lib/Service/DueNotificationService.php` — bounded due/overdue scanning.
@@ -1525,6 +1769,11 @@ typed number comparison):
   the 32 MB browser source-file cap is only a local memory guard.
 - Template import/export has not been exercised on a real Nextcloud instance;
   see [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md).
+- The 0.5.0 Nextcloud Files integration (#45–#55) — destination resolution,
+  Files-backed evidence, reconciliation, run deletion/cleanup records and the
+  legacy AppData migration — is likewise **not** exercised on a real Nextcloud
+  instance (unit tests use in-memory Files/AppData/lock doubles); the
+  real-environment items are listed in section 8 of the acceptance checklist.
 - The template and run detail endpoints load steps per section (no batching yet).
 - Reordering and deleting update rows sequentially without an explicit database
   transaction.
@@ -1539,17 +1788,21 @@ typed number comparison):
 
 ## Release
 
-- **Version:** 0.4.0 release candidate (`appinfo/info.xml`, `package.json`).
+- **Version:** 0.5.0 release candidate (`appinfo/info.xml`, `package.json`).
 - **Nextcloud:** 33.
 - **PHP:** 8.2 – 8.5.
 - **Databases:** MySQL/MariaDB, PostgreSQL and SQLite.
 - **License:** AGPL-3.0-or-later.
 
-The 0.4.0 UX and template import/export work (#26–#33) is packaged as a **release
-candidate for manual acceptance**. It is not a published or production-verified
-release: the archives have not been uploaded or deployed, and the real-Nextcloud
-acceptance run is still outstanding. The v0.3.0 material below is retained as
-historical release information.
+The 0.5.0 Nextcloud Files integration (#45–#56) is prepared as a **release
+candidate for manual acceptance**: this candidate covers Files destinations and
+Files-backed evidence, out-of-band reconciliation, fail-closed run deletion with
+durable cleanup records, and the legacy AppData migration. It is **not** a
+published, production-verified release: real-Nextcloud acceptance is still
+outstanding, and the package must not be treated as production-ready until the
+checklist has been executed. The 0.4.0 UX/import–export work (#26–#33) was
+prepared as the previous candidate and was never deployed. The v0.3.0 material
+below is retained as historical release information.
 
 ### v0.3.0
 
@@ -1635,8 +1888,8 @@ php build/create-package.php
 
 `build/create-package.php` reads the version from `appinfo/info.xml`, writes a
 staging tree with runtime files only and creates `runbook-<version>.tar.gz`
-(archive root `runbook/`) — for example `runbook-0.4.0.tar.gz` for the current
-0.4.0 release candidate. Before archiving it validates the staging tree with
+(archive root `runbook/`) — for example `runbook-0.5.0.tar.gz` for the current
+0.5.0 release candidate. Before archiving it validates the staging tree with
 `build/validate-package.php --package=<staging-directory>`, which also checks
 that every relative link in the packaged `README.md` resolves inside the tree
 (and does not escape it through `..` or an absolute path), including the `docs/`
@@ -1652,9 +1905,10 @@ The package excludes `node_modules/`, `vendor/`, `tests/`, `.github/`, `.git/`,
 `build/`, the TypeScript/Vue sources, lock files, source maps, caches, logs,
 secrets and editor settings.
 
-### Live Nextcloud verification
+### Live Nextcloud verification (v0.3.0)
 
-Live verification was completed against a disposable Docker environment:
+Live verification was completed against a disposable Docker environment for the
+v0.3.0 milestone:
 
 - image `nextcloud:33-apache` (Nextcloud 33.0.9, PHP 8.4, SQLite);
 - the packaged app (not the development tree) was installed into
@@ -1679,11 +1933,12 @@ Limitation: only SQLite was exercised live in this environment; MySQL and
 PostgreSQL are declared and covered by the portable schema/migration tests but
 were not run against live database servers here.
 
-The 0.3.0 verification above predates the milestone 0.4.0 work (#26–#33). The
-0.4.0 import/export and UX integration is **code-complete but not yet verified on
-a real instance**; run [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md)
-against the packaged build. No automated check in this repository claims that
-manual acceptance passed.
+The 0.3.0 verification above predates the milestone 0.4.0 (#26–#33) and 0.5.0
+(#45–#56) work. The 0.4.0 import/export and UX integration and the 0.5.0
+Nextcloud Files integration are **code-complete but not verified on a real
+instance**; run [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md)
+against the packaged build (section 8 covers the 0.5.0 Files integration). No
+automated check in this repository claims that manual acceptance passed.
 
 ### Retention
 

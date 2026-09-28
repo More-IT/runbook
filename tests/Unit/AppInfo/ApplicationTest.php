@@ -6,6 +6,8 @@ namespace OCA\Runbook\Tests\Unit\AppInfo;
 
 use OCA\Runbook\AppInfo\Application;
 use OCA\Runbook\BackgroundJob\DueStepNotificationJob;
+use OCA\Runbook\BackgroundJob\FilesCleanupRetryJob;
+use OCA\Runbook\BackgroundJob\LegacyMigrationJob;
 use OCA\Runbook\Dashboard\Widget;
 use OCA\Runbook\Middleware\ExceptionMiddleware;
 use OCA\Runbook\Notification\Notifier;
@@ -33,9 +35,12 @@ class ApplicationTest extends TestCase {
 		$this->application()->register($context);
 	}
 
-	public function testBootRegistersBackgroundJob(): void {
+	public function testBootRegistersBackgroundJobs(): void {
+		$registered = [];
 		$jobList = $this->createMock(IJobList::class);
-		$jobList->expects(self::once())->method('add')->with(DueStepNotificationJob::class);
+		$jobList->method('add')->willReturnCallback(function (string $job) use (&$registered): void {
+			$registered[] = $job;
+		});
 
 		$context = $this->createMock(IBootContext::class);
 		$context->method('injectFn')->willReturnCallback(
@@ -43,5 +48,9 @@ class ApplicationTest extends TestCase {
 		);
 
 		$this->application()->boot($context);
+
+		self::assertContains(DueStepNotificationJob::class, $registered);
+		self::assertContains(FilesCleanupRetryJob::class, $registered);
+		self::assertContains(LegacyMigrationJob::class, $registered);
 	}
 }

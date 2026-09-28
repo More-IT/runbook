@@ -21,7 +21,7 @@ use OCP\IRequest;
  * @phpstan-import-type RunStepData from RunStep
  */
 class RunController extends ApiController {
-	private const FIELDS = ['title', 'description', 'dueAt'];
+	private const FIELDS = ['title', 'description', 'dueAt', 'destinationPath'];
 
 	public function __construct(
 		string $appName,
@@ -58,7 +58,7 @@ class RunController extends ApiController {
 	}
 
 	/**
-	 * @return JSONResponse<Http::STATUS_OK, array{run: RunData, sections: list<array{section: RunSectionData, steps: list<RunStepData>, state: string, blockedBy: list<string>, reason: list<array<string, mixed>>}>, progress: array{total: int, completed: int, skipped: int, pending: int, percentage: int, canComplete: bool}, permissions: array{role: string|null, canManage: bool, canModify: bool, canCancel: bool, canReopen: bool, canManageAssignments: bool, executableStepIds: list<int>}}, array{}>
+	 * @return JSONResponse<Http::STATUS_OK, array{run: RunData, sections: list<array{section: RunSectionData, steps: list<RunStepData>, state: string, blockedBy: list<string>, reason: list<array<string, mixed>>}>, progress: array{total: int, completed: int, skipped: int, pending: int, percentage: int, canComplete: bool}, permissions: array{uid: string, role: string|null, canManage: bool, canModify: bool, canCancel: bool, canReopen: bool, canManageAssignments: bool, canComment: bool, canDelete: bool, executableStepIds: list<int>}, evidenceDegraded: bool, managedFolderState: string}, array{}>
 	 */
 	#[NoAdminRequired]
 	public function show(): JSONResponse {
@@ -84,6 +84,8 @@ class RunController extends ApiController {
 			'sections' => $sections,
 			'progress' => $detail['progress'],
 			'permissions' => $detail['permissions'],
+			'evidenceDegraded' => $detail['evidenceDegraded'],
+			'managedFolderState' => $detail['managedFolderState'],
 		]);
 	}
 

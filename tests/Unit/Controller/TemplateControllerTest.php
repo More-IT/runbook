@@ -154,4 +154,73 @@ class TemplateControllerTest extends TestCase {
 			}
 		}
 	}
+
+	public function testShowIncludesDestinationState(): void {
+		$template = $this->createMock(Template::class);
+		$template->method('toArray')->willReturn(['id' => 5, 'title' => 'Deploy']);
+		$this->templateService->method('getTemplate')->with(5)->willReturn($template);
+		$this->templateService->method('getSections')->willReturn([]);
+		$this->templateService->method('getPermissions')->willReturn([
+			'role' => 'OWNER',
+			'canView' => true,
+			'canExecute' => true,
+			'canEdit' => true,
+			'canManageAcl' => true,
+			'canDelete' => true,
+		]);
+		$this->templateService->expects(self::once())
+			->method('getTemplateDestinationState')
+			->with($template)
+			->willReturn(['configured' => true, 'valid' => true, 'path' => '/Shared/Reports', 'configuredBy' => 'alice']);
+
+		$response = $this->controller(['id' => '5'])->show();
+
+		self::assertSame(200, $response->getStatus());
+		self::assertSame('/Shared/Reports', $response->getData()['destination']['path']);
+	}
+
+	public function testUpdateDestinationSavesTheSelectedPath(): void {
+		$template = $this->createMock(Template::class);
+		$template->method('toArray')->willReturn(['id' => 5]);
+		$this->templateService->expects(self::once())
+			->method('setTemplateDestination')
+			->with(5, '/Shared/Reports')
+			->willReturn($template);
+		$this->templateService->expects(self::once())
+			->method('getTemplateDestinationState')
+			->with($template)
+			->willReturn(['configured' => true, 'valid' => true, 'path' => '/Shared/Reports', 'configuredBy' => 'alice']);
+
+		$response = $this->controller(['id' => '5', 'path' => '/Shared/Reports'])->updateDestination();
+
+		self::assertSame(200, $response->getStatus());
+		self::assertSame('/Shared/Reports', $response->getData()['destination']['path']);
+	}
+
+	public function testUpdateDestinationRejectsAMissingPath(): void {
+		$this->templateService->expects(self::never())->method('setTemplateDestination');
+
+		$this->expectException(\OCA\Runbook\Service\ValidationException::class);
+		$this->controller(['id' => '5'])->updateDestination();
+	}
+
+	public function testClearDestinationResetsTheReference(): void {
+		$template = $this->createMock(Template::class);
+		$template->method('toArray')->willReturn(['id' => 5]);
+		$this->templateService->expects(self::once())
+			->method('clearTemplateDestination')
+			->with(5)
+			->willReturn($template);
+		$this->templateService->method('getTemplateDestinationState')->willReturn([
+			'configured' => false,
+			'valid' => false,
+			'path' => null,
+			'configuredBy' => null,
+		]);
+
+		$response = $this->controller(['id' => '5'])->clearDestination();
+
+		self::assertSame(200, $response->getStatus());
+		self::assertFalse($response->getData()['destination']['configured']);
+	}
 }

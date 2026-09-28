@@ -137,7 +137,28 @@ export interface RunAttachment {
 	size: number
 	checksum: string
 	createdAt: number
+	/** Reconciled Files state (issue #52); absent is treated as present. */
+	fileState?: EvidenceState
 }
+
+/**
+ * Out-of-band reconciliation state of tracked Files evidence (issue #52).
+ */
+export type EvidenceState = 'present' | 'missing' | 'out_of_scope' | 'unavailable'
+
+/**
+ * Request body for attaching a copy of an existing Files item (issue #53). Only
+ * an advisory, user-visible source path is sent; identity is resolved server-side.
+ */
+export interface CopyEvidencePayload {
+	sourcePath: string
+}
+
+/**
+ * Availability of the run's managed Files folder (issue #52), used for truthful
+ * degraded-evidence copy. `not_applicable` means the run has no Files destination.
+ */
+export type ManagedFolderState = 'available' | 'missing' | 'unavailable' | 'not_applicable'
 
 export type ActivityType
 	= | 'run_started'
@@ -195,6 +216,10 @@ export interface RunDetail {
 	sections: RunSectionWithSteps[]
 	progress: RunProgress
 	permissions: RunPermissions
+	/** True when at least one tracked evidence file is missing/out-of-scope/unavailable (#52). */
+	evidenceDegraded?: boolean
+	/** Availability of the run-managed Files folder (#52), for truthful copy. */
+	managedFolderState?: ManagedFolderState
 }
 
 export interface RunListItem {
@@ -206,6 +231,7 @@ export interface StartRunPayload {
 	title: string
 	description?: string
 	dueAt?: number | null
+	destinationPath?: string | null
 }
 
 export interface RunAclEntry {

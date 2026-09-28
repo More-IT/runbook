@@ -28,7 +28,8 @@ import SectionStatus from '../components/SectionStatus.vue'
 import { getFeatures } from '../services/adminSettings.ts'
 import * as api from '../services/runs.ts'
 import { apiErrorMessage } from '../utils/apiError.ts'
-import { attachmentsForStep as attachmentsForStepHelper } from '../utils/runEvidence.ts'
+import { buildCopyEvidencePayload } from '../utils/copyEvidence.ts'
+import { attachmentsForStep as attachmentsForStepHelper, degradedEvidenceNotice } from '../utils/runEvidence.ts'
 import {
 	nextActionHint,
 	runProgressDisplay,
@@ -474,6 +475,16 @@ function uploadEvidence(stepId: number, file: File): void {
 }
 
 /**
+ * Attach a copy of an existing Files item to a step (issue #53).
+ *
+ * @param stepId Run step identifier.
+ * @param sourcePath Advisory source path selected by the user.
+ */
+function copyEvidence(stepId: number, sourcePath: string): void {
+	void mutate(() => api.copyAttachment(stepId, buildCopyEvidencePayload(sourcePath)))
+}
+
+/**
  * Delete an evidence attachment.
  *
  * @param id Attachment identifier.
@@ -575,6 +586,9 @@ function formatDate(timestamp: number): string {
 			</NcNoteCard>
 			<NcNoteCard v-if="!runActive" type="info">
 				{{ t('runbook', 'This run is read-only. Reopen it to continue execution.') }}
+			</NcNoteCard>
+			<NcNoteCard v-if="detail.evidenceDegraded" type="warning">
+				{{ degradedEvidenceNotice(t, attachments, detail.managedFolderState) }}
 			</NcNoteCard>
 
 			<div v-if="progressDisplay" class="runbook-exec__progress">
@@ -765,6 +779,7 @@ function formatDate(timestamp: number): string {
 									@return="(reason) => returnStep(step.id, reason)"
 									@assign="(payload) => assignStep(step.id, payload)"
 									@uploadEvidence="(file) => uploadEvidence(step.id, file)"
+									@copyEvidence="(path) => copyEvidence(step.id, path)"
 									@deleteEvidence="deleteEvidence" />
 							</div>
 						</div>

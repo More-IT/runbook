@@ -1,14 +1,17 @@
-# Runbook 0.4.0 release candidate — manual acceptance checklist
+# Runbook release candidate — manual acceptance checklist
 
 This checklist is for the **real-Nextcloud production acceptance test** of the
-milestone 0.4.0 release candidate (issues #26–#33). It must be executed manually
-on a packaged build; **nothing here is marked as passed by the automated suite**,
-and no item may be ticked without being observed.
+release candidate. It covers the 0.4.0 UX redesign and template import/export
+(issues #26–#33) and the 0.5.0 Nextcloud Files integration (issues #45–#56). It
+must be executed manually on a packaged build; **nothing here is marked as passed
+by the automated suite**, and no item may be ticked without being observed.
 
-The release-preparation task set the application version to **0.4.0**; verify in
-the package that `appinfo/info.xml` and `package.json` say 0.4.0 **before** this
-checklist is run. If the packaged version is still 0.3.0, stop and rebuild the
-package.
+The application version for this candidate is **0.5.0** (`appinfo/info.xml`,
+`package.json`); the 0.5.0 Nextcloud Files integration is packaged as a release
+candidate and is **not** production-verified. Verify in the package that
+`appinfo/info.xml` and `package.json` report the intended version **before** this
+checklist is run. If the packaged version differs from the intended candidate,
+stop and rebuild the package.
 
 Record for every run: source commit **or** a complete source manifest/diff with
 hashes that covers untracked files, package checksum (SHA-256), packaged app
@@ -17,7 +20,7 @@ version, Nextcloud version, PHP version, database, browser and OS, and the date.
 ## 0. Setup
 
 - [ ] Build the release archive from an **identified and reproducible source state**: either a specific commit hash, or a complete source manifest/diff with SHA-256 hashes that **includes untracked files** (`git status --short` alone is not sufficient, because it does not capture the content of untracked files). A clean tree is not required as long as the state is fully recorded and reproducibly rebuildable.
-- [ ] Record the archive SHA-256 and the **packaged app version**; confirm it is the intended 0.4.0 release candidate set by the release-preparation task.
+- [ ] Record the archive SHA-256 and the **packaged app version**; confirm it is the intended 0.5.0 release candidate.
 - [ ] Install/enable `runbook` on the test instance and confirm the installed version matches the recorded package version.
 - [ ] Run the database migrations and confirm no errors on an upgrade from a previous version.
 - [ ] Seed at least one user, one group, and an admin account that is **not** a template owner.
@@ -96,6 +99,56 @@ version, Nextcloud version, PHP version, database, browser and OS, and the date.
 - [ ] A run snapshot is unaffected by later template edits.
 - [ ] After an upgrade, clear the Nextcloud/app cache and confirm the new bundle loads.
 - [ ] Confirm the packaged archive contains no `build/` or `src/` development sources.
+
+## 8. Milestone 0.5.0 — Nextcloud Files integration (#45–#56)
+
+These items require a real Nextcloud instance with a real Files/AppData backend
+and real users/mounts. They are **not** covered by the automated suite (which
+uses in-memory doubles) and are **not** verified until observed here.
+
+### 8.1 Destination precedence and folder model
+
+- [ ] Nothing configured: starting a run creates `Files/Runbook` and a per-run subfolder `<title> (<full uuid>)` carrying a valid `.runbook-run.json` marker; evidence is stored there.
+- [ ] A run-time folder chosen in the Start run dialog is used and frozen (`source=runtime`); an unresolvable run-time choice fails the start with a clear error and **no** fallback.
+- [ ] A template destination is used when no run-time choice is supplied; an invalid/unavailable template destination blocks the start (no fallback) and the chooser's own mount is irrelevant.
+- [ ] A global administration destination is used when neither run-time nor template supplies one; it must resolve in the **run owner's** view (a folder shared only to the admin fails with `destination_no_access`).
+- [ ] A folder reachable through two mounts (or two in-scope candidates) resolves as `destination_ambiguous`; there is no first-candidate pick.
+- [ ] Quota exhausted / mount unavailable surface `destination_quota_exceeded` / `destination_unavailable` and no run is created.
+
+### 8.2 Evidence stored in Files
+
+- [ ] Uploads store the file inside the run-managed folder by exact identity; storage paths/ids are never exposed by the API.
+- [ ] Owner, assigned user and group assignee can upload/download per #51; viewers and unrelated users are denied.
+- [ ] "Attach a copy from Files" leaves the original untouched and stores a normal Files-backed attachment.
+- [ ] The reserved `.runbook-run.json` marker cannot be uploaded as evidence; duplicate names never overwrite existing files.
+
+### 8.3 Out-of-band reconciliation and degraded evidence
+
+- [ ] Rename/move **within** the run folder stays `present`; move **outside** shows `out_of_scope`; delete shows `missing`.
+- [ ] A required FILE step cannot be newly completed with missing/out-of-scope evidence; a completed step stays completed and the run reports `evidenceDegraded`.
+- [ ] The degraded notice is truthful about whether a replacement upload is possible (folder available vs missing/unavailable).
+- [ ] Revoked Files access and a mid-run folder deletion fail closed and are surfaced.
+
+### 8.4 Run deletion and cleanup records
+
+- [ ] A tracked file that denies delete blocks the whole deletion (`run_delete_blocked`); the run and identities remain.
+- [ ] Deleting a run removes tracked Files evidence and **preserves** the managed folder (it is never recursively deleted); a `runbook_files_cleanup` record is committed in the same transaction as the run-row removal.
+- [ ] Untracked files added to the run folder are preserved and the record is finalized `blocked`/`not_empty`.
+- [ ] The hourly retry closes the record once the folder is gone; the base folder and other runs' folders are never touched.
+
+### 8.5 Legacy AppData migration (#55)
+
+- [ ] A legacy run's AppData evidence is copied to the resolved destination, verified (size + SHA-256), switched to `storage_kind='files'`, and only **then** is the AppData source deleted.
+- [ ] AppData evidence stays readable until migrated and remains readable from Files afterwards.
+- [ ] An invalid/unavailable configured destination blocks that run's migration without fallback; AppData evidence is kept.
+- [ ] `GET`/`POST /api/v1/admin/migration` (administrators only) reports remaining active AppData attachments, residual cleanup and blocked runs with actionable reasons.
+- [ ] An interrupted migration resumes without duplicates; a residual `migration_source_delete_failed` is reported and retried without touching the verified Files copy.
+- [ ] Two overlapping batches (hourly job vs admin trigger) do not process the same batch; the overlapping call reports `busy` without advancing the cursor.
+
+### 8.6 Localization and packaging
+
+- [ ] The packaged archive contains the compiled `js/`, `l10n/`, `lib/`, `templates/`, `img/`, `appinfo/` and the `docs/` linked from README, and no `src/`, `build/`, `tests/`, `.github/`, `vendor/` or `node_modules/`.
+- [ ] `pt_BR` equals `pt_PT` value-for-value for every key on the running instance.
 
 Sign-off: tester name, date, packages/build hash, and any deviation with a
 reference to the file and line if applicable.

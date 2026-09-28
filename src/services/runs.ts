@@ -5,6 +5,7 @@
 
 import type {
 	CommentCreatePayload,
+	CopyEvidencePayload,
 	MyWorkFilter,
 	Overview,
 	Run,
@@ -327,6 +328,25 @@ export async function uploadAttachment(stepId: number, file: File): Promise<RunA
 		endpoint(`/run-steps/${stepId}/attachments`),
 		form,
 		{ headers: { 'Content-Type': 'multipart/form-data' } },
+	)
+
+	return data.attachment
+}
+
+/**
+ * Attach a copy of an existing Files item to a run step (issue #53).
+ *
+ * Only an advisory, user-visible source path is sent; the server resolves and
+ * authorises the source in the acting user's own Files and copies the bytes into
+ * the run-managed folder. The original file is never modified.
+ *
+ * @param stepId Run step identifier.
+ * @param payload Copy request body with the source path.
+ */
+export async function copyAttachment(stepId: number, payload: CopyEvidencePayload): Promise<RunAttachment> {
+	const { data } = await axios.post<{ attachment: RunAttachment }>(
+		endpoint(`/run-steps/${stepId}/attachments/copy`),
+		payload,
 	)
 
 	return data.attachment

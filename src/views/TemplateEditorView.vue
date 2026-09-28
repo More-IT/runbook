@@ -9,12 +9,14 @@ import type {
 	SectionWithSteps,
 	StepPayload,
 	Template,
+	TemplateDestinationState,
 	TemplateDetail,
 	TemplatePermissions,
 	TemplateSection,
 } from '../models/template.ts'
 import type { EditorDraftState } from '../utils/editorDrafts.ts'
 
+import { FilePickerClosed, FilePickerType, getFilePickerBuilder } from '@nextcloud/dialogs'
 import { translate as t } from '@nextcloud/l10n'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
@@ -30,6 +32,7 @@ import SectionOutline from '../components/SectionOutline.vue'
 import StartRunDialog from '../components/StartRunDialog.vue'
 import TemplateStatusBadge from '../components/TemplateStatusBadge.vue'
 import * as api from '../services/templates.ts'
+import { destinationStatus } from '../utils/adminDestination.ts'
 import { apiErrorMessage } from '../utils/apiError.ts'
 import {
 	applyStepSaveResult,
@@ -45,6 +48,12 @@ import {
 	neighborSectionId,
 	sectionOutline,
 } from '../utils/templateAuthoring.ts'
+import {
+	EMPTY_TEMPLATE_DESTINATION,
+	selectedPathFromPicker,
+	templateDestinationPath,
+	templateDestinationStatusText,
+} from '../utils/templateDestination.ts'
 
 const props = defineProps<{
 	templateId: number
@@ -74,6 +83,15 @@ const title = ref('')
 const description = ref('')
 const pendingAction = ref<'archive' | 'delete' | null>(null)
 const showStartRun = ref(false)
+
+// Optional per-template destination folder (issue #48).
+const destination = ref<TemplateDestinationState>({ ...EMPTY_TEMPLATE_DESTINATION })
+const destinationSaving = ref(false)
+const destinationError = ref<string | null>(null)
+const destinationSaved = ref(false)
+const destinationStatusValue = computed(() => destinationStatus(destination.value))
+const destinationDisplayPath = computed(() => templateDestinationPath(destination.value))
+const destinationStatusMessage = computed(() => templateDestinationStatusText(t, destination.value))
 
 /** Focused section for the editor; selection only changes the editor focus. */
 const selectedSectionId = ref<number | null>(null)
@@ -189,6 +207,9 @@ async function load(): Promise<void> {
 		detail.value = loaded
 		title.value = loaded.template.title
 		description.value = loaded.template.description
+		destination.value = loaded.destination ?? { ...EMPTY_TEMPLATE_DESTINATION }
+		destinationError.value = null
+		destinationSaved.value = false
 		if (!hasSection(loaded.sections, selectedSectionId.value)) {
 			selectedSectionId.value = defaultSelectedSectionId(loaded.sections)
 		}
@@ -214,6 +235,9 @@ watch(() => props.templateId, () => {
 	detail.value = null
 	title.value = ''
 	description.value = ''
+	destination.value = { ...EMPTY_TEMPLATE_DESTINATION }
+	destinationError.value = null
+	destinationSaved.value = false
 	selectedSectionId.value = null
 	sectionDirty.value = false
 	stepDirty.value = false
@@ -234,6 +258,73 @@ function applyTemplate(updated: Template): void {
 	detail.value.template = updated
 	title.value = updated.title
 	description.value = updated.description
+}
+
+/**
+ * Open the Nextcloud Files picker and save the selected folder as the template
+ * destination (issue #48).
+ */
+async function selectTemplateDestination(): Promise<void> {
+	destinationError.value = null
+	destinationSaved.value = false
+
+	let picked: unknown
+	try {
+		picked = await getFilePickerBuilder(t('runbook', 'Select destination folder'))
+			.setMultiSelect(false)
+			.allowDirectories(true)
+			.setType(FilePickerType.Choose)
+			.build()
+			.pick()
+	} catch (caught) {
+		if (caught instanceof FilePickerClosed) {
+			return
+		}
+		destinationError.value = apiErrorMessage(caught)
+		return
+	}
+
+	const path = selectedPathFromPicker(picked)
+	if (path === null) {
+		return
+	}
+
+	await persistTemplateDestination(path)
+}
+
+/**
+ * Persist the selected folder path (server-side re-resolution).
+ *
+ * @param path Selected folder path.
+ */
+async function persistTemplateDestination(path: string): Promise<void> {
+	destinationSaving.value = true
+	try {
+		destination.value = await api.saveTemplateDestination(props.templateId, path)
+		destinationSaved.value = true
+	} catch (caught) {
+		destinationError.value = apiErrorMessage(caught)
+	} finally {
+		destinationSaving.value = false
+	}
+}
+
+/**
+ * Clear the configured template destination, restoring the fall-through to the
+ * global administration destination and the #46 default.
+ */
+async function clearTemplateDestination(): Promise<void> {
+	destinationError.value = null
+	destinationSaved.value = false
+	destinationSaving.value = true
+	try {
+		destination.value = await api.clearTemplateDestination(props.templateId)
+		destinationSaved.value = true
+	} catch (caught) {
+		destinationError.value = apiErrorMessage(caught)
+	} finally {
+		destinationSaving.value = false
+	}
 }
 
 /**
@@ -800,6 +891,44 @@ defineExpose({ discardAllDrafts, hasDrafts })
 				<AclEditor :templateId="templateId" :owner="template?.owner ?? ''" :readOnly="isArchived" />
 			</details>
 
+			<details class="runbook-author__panel">
+				<summary>{{ t('runbook', 'Destination folder') }}</summary>
+				<div class="runbook-author__destination">
+					<p class="runbook-author__hint">
+						{{ t('runbook', 'Runs started from this template store their files in Nextcloud Files. Choose a folder the run owner can write to. When unset, runs use the global destination, or the default “Runbook” folder in the run owner’s Files.') }}
+					</p>
+					<NcNoteCard v-if="destinationError" type="error">
+						{{ destinationError }}
+					</NcNoteCard>
+					<NcNoteCard v-else-if="destinationSaved" type="success">
+						{{ t('runbook', 'Template destination updated.') }}
+					</NcNoteCard>
+					<NcNoteCard v-else-if="destinationStatusValue === 'invalid'" type="warning">
+						{{ destinationStatusMessage }}
+					</NcNoteCard>
+					<div class="runbook-author__destination-row">
+						<span class="runbook-author__destination-path">
+							{{ destinationDisplayPath ?? t('runbook', 'Not configured') }}
+						</span>
+						<template v-if="canEdit">
+							<NcButton :disabled="busy || destinationSaving" @click="selectTemplateDestination">
+								{{ destinationStatusValue === 'unset' ? t('runbook', 'Select folder') : t('runbook', 'Change folder') }}
+							</NcButton>
+							<NcButton
+								v-if="destinationStatusValue !== 'unset'"
+								variant="error"
+								:disabled="busy || destinationSaving"
+								@click="clearTemplateDestination">
+								{{ t('runbook', 'Remove') }}
+							</NcButton>
+						</template>
+					</div>
+					<p class="runbook-author__hint">
+						{{ destinationStatusMessage }}
+					</p>
+				</div>
+			</details>
+
 			<section class="runbook-author__workspace">
 				<div class="runbook-author__workspace-header">
 					<h3>{{ t('runbook', 'Sections') }}</h3>
@@ -972,6 +1101,28 @@ defineExpose({ discardAllDrafts, hasDrafts })
 .runbook-author__fields-actions {
 	display: flex;
 	gap: var(--runbook-space-2);
+}
+
+.runbook-author__destination {
+	display: flex;
+	flex-direction: column;
+	gap: var(--runbook-space-2);
+}
+
+.runbook-author__destination-row {
+	display: flex;
+	align-items: center;
+	gap: var(--runbook-space-2);
+}
+
+.runbook-author__destination-path {
+	flex: 1 1 auto;
+	font-weight: bold;
+	overflow-wrap: anywhere;
+}
+
+.runbook-author__hint {
+	color: var(--color-text-maxcontrast, #555);
 }
 
 .runbook-author__workspace {

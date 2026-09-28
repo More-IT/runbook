@@ -6,6 +6,7 @@ namespace OCA\Runbook\Service;
 
 use OCA\Runbook\Db\Attachment;
 use OCA\Runbook\Db\AttachmentMapper;
+use OCA\Runbook\Db\Run;
 use OCA\Runbook\Enum\ActivityType;
 use OCA\Runbook\Enum\RunStatus;
 use OCA\Runbook\Enum\RunStepStatus;
@@ -16,15 +17,17 @@ use OCP\IUserSession;
 use OCP\Security\ISecureRandom;
 
 /**
- * Evidence attachments stored in Nextcloud AppData.
+ * Evidence attachments.
  *
- * The binary content lives under an application-controlled AppData path; the
- * database only stores metadata and a random storage key that is never exposed
- * through the API.
+ * New evidence is written to the run's managed folder in Nextcloud Files and
+ * tracked by identity `(storage_id, file_id)`; a run without a usable managed
+ * folder fails closed and never falls back to AppData. Existing AppData
+ * attachments (from before the Files milestone) remain readable/deletable until
+ * the #55 migration. Storage paths, ids and keys are never exposed through the
+ * API.
  */
 class AttachmentService {
 	private const MAX_FILENAME_LENGTH = 255;
-	private const STORAGE_KEY_LENGTH = 32;
 
 	/**
 	 * Conservative allowlist of common evidence MIME types detected from the
@@ -49,6 +52,9 @@ class AttachmentService {
 		private readonly EvidenceLockService $evidenceLock,
 		private readonly RunAccessService $access,
 		private readonly EvidenceStorage $storage,
+		private readonly FilesAttachmentStorage $filesStorage,
+		private readonly RunDestinationResolver $destinations,
+		private readonly AttachmentReconciliationService $reconciliation,
 		private readonly ActivityService $activity,
 		private readonly AdminSettings $settings,
 		private readonly UploadedFileReader $fileReader,
@@ -69,12 +75,34 @@ class AttachmentService {
 	}
 
 	/**
+	 * Attachments of a run with their reconciled `file_state` (issue #52) and a
+	 * run-level degraded flag.
+	 *
+	 * @return array{attachments: list<array{attachment: Attachment, fileState: string}>, degraded: bool}
+	 */
+	public function describeForRun(int $runId): array {
+		$run = $this->runService->requireAccessibleRun($runId);
+
+		$described = [];
+		$degraded = false;
+		foreach ($this->attachments->findByRun($runId) as $attachment) {
+			$state = $this->reconciliation->stateFor($run, $attachment);
+			if ($state !== AttachmentReconciliationService::PRESENT) {
+				$degraded = true;
+			}
+			$described[] = ['attachment' => $attachment, 'fileState' => $state];
+		}
+
+		return ['attachments' => $described, 'degraded' => $degraded];
+	}
+
+	/**
 	 * Upload evidence to a step the current user may execute.
 	 *
 	 * @param array<array-key, mixed> $file Raw upload entry.
 	 */
 	public function upload(int $stepId, array $file): Attachment {
-		[$run, $step] = $this->runStepService->requireExecutableStep($stepId);
+		[$run] = $this->runStepService->requireExecutableStep($stepId);
 
 		$read = $this->fileReader->read($file);
 		$filename = $this->sanitizeFilename($read['name']);
@@ -93,40 +121,60 @@ class AttachmentService {
 			throw new ValidationException('attachment_mime_not_allowed');
 		}
 
-		$checksum = hash('sha256', $content);
-		$storageKey = $this->secureRandom->generate(self::STORAGE_KEY_LENGTH, '0123456789abcdef');
-		$runId = $run->getId();
-		$now = $this->timeFactory->getTime();
+		return $this->storeFilesAttachment($run, $stepId, $filename, $content, $mimeType);
+	}
 
-		$this->storage->write($runId, $stepId, $storageKey, $content);
+	/**
+	 * Attach a copy of an existing Files item as evidence (issue #53).
+	 *
+	 * The acting user selects a file in their own Files; the server resolves it,
+	 * verifies read permission, and copies the bytes into the run-managed folder
+	 * in the **run owner's** view. The original is never moved, renamed,
+	 * overwritten or deleted, and the new attachment is a normal Files-backed
+	 * attachment whose identity is the copied destination node.
+	 *
+	 * @param array<string, mixed> $data Request body; only `sourcePath` is read.
+	 */
+	public function copyFromFiles(int $stepId, array $data): Attachment {
+		[$run] = $this->runStepService->requireExecutableStep($stepId);
+		$sourcePath = $this->readSourcePath($data);
+
+		$source = $this->destinations->resolveSourceFile($this->currentUserId(), $sourcePath);
+		$filename = $this->sanitizeFilename($source->getName());
 
 		try {
-			$attachment = new Attachment();
-			$attachment->setUuid($this->generateUuid());
-			$attachment->setRunId($runId);
-			$attachment->setStepId($stepId);
-			$attachment->setUploaderUid($this->currentUserId());
-			$attachment->setFilename($filename);
-			$attachment->setStorageKey($storageKey);
-			$attachment->setMimeType($mimeType);
-			$attachment->setSize($size);
-			$attachment->setChecksum($checksum);
-			$attachment->setCreatedAt($now);
-			$attachment = $this->attachments->insert($attachment);
+			$sourceSize = (int)$source->getSize();
 		} catch (\Throwable $exception) {
-			// Metadata creation failed: never leave an orphan file behind.
-			$this->storage->delete($runId, $stepId, $storageKey);
-			throw $exception;
+			throw $this->destinations->translateSourceFilesError($exception);
+		}
+		if ($sourceSize === 0) {
+			throw new ValidationException('attachment_empty');
+		}
+		if ($sourceSize > $this->settings->getMaxAttachmentSize()) {
+			throw new ValidationException('attachment_too_large');
 		}
 
-		$this->activity->record($runId, $stepId, ActivityType::AttachmentUploaded, [
-			'attachmentId' => $attachment->getId(),
-			'filename' => $filename,
-			'mimeType' => $mimeType,
-			'size' => $size,
-		], $this->currentUserId());
+		try {
+			$content = $source->getContent();
+		} catch (\Throwable $exception) {
+			throw $this->destinations->translateSourceFilesError($exception);
+		}
 
-		return $attachment;
+		// Re-check after reading: the source size is advisory and must not be
+		// trusted to bound the actual byte count.
+		if (strlen($content) === 0) {
+			throw new ValidationException('attachment_empty');
+		}
+		if (strlen($content) > $this->settings->getMaxAttachmentSize()) {
+			throw new ValidationException('attachment_too_large');
+		}
+
+		$mimeType = $this->fileTypeDetector->detect($content, $filename);
+		if (!in_array($mimeType, self::ALLOWED_MIME_TYPES, true)) {
+			throw new ValidationException('attachment_mime_not_allowed');
+		}
+
+		return $this->storeFilesAttachment($run, $stepId, $filename, $content, $mimeType);
 	}
 
 	/**
@@ -134,13 +182,17 @@ class AttachmentService {
 	 */
 	public function download(int $id): array {
 		$attachment = $this->requireAttachment($id);
-		$this->runService->requireAccessibleRun($attachment->getRunId());
+		$run = $this->runService->requireAccessibleRun($attachment->getRunId());
 
-		$content = $this->storage->read(
-			$attachment->getRunId(),
-			$attachment->getStepId(),
-			$attachment->getStorageKey(),
-		);
+		if ($attachment->getStorageKind() === Attachment::STORAGE_KIND_FILES) {
+			$content = $this->filesStorage->read($run, $attachment);
+		} else {
+			$content = $this->storage->read(
+				$attachment->getRunId(),
+				$attachment->getStepId(),
+				$attachment->getStorageKey(),
+			);
+		}
 
 		return ['attachment' => $attachment, 'content' => $content];
 	}
@@ -161,13 +213,14 @@ class AttachmentService {
 		// The count check and the removal must be atomic with step completion so
 		// two concurrent deletions cannot both remove the last two attachments.
 		$this->evidenceLock->synchronized($run->getId(), $attachment->getStepId(), function () use ($run, $attachment, $uid): void {
-			// A completed required FILE step must keep at least one piece of
-			// evidence. Upload a replacement first, then delete the old file.
+			// A completed required FILE step must keep at least one *present*
+			// piece of evidence (#52): upload a replacement first, then delete.
 			$step = $this->runStepService->findStep($attachment->getStepId());
 			if ($step->getType() === StepType::File->value
 				&& $step->getRequired()
 				&& $step->getStatus() === RunStepStatus::Completed->value
-				&& $this->attachments->countByRunAndStep($run->getId(), $step->getId()) <= 1) {
+				&& $this->reconciliation->stateFor($run, $attachment) === AttachmentReconciliationService::PRESENT
+				&& $this->reconciliation->presentCount($run, $this->attachments->findByStep($step->getId())) <= 1) {
 				throw new ConflictException('last_file_evidence_required');
 			}
 
@@ -177,9 +230,154 @@ class AttachmentService {
 				'filename' => $attachment->getFilename(),
 			], $uid);
 
-			$this->storage->delete($run->getId(), $attachment->getStepId(), $attachment->getStorageKey());
+			if ($attachment->getStorageKind() === Attachment::STORAGE_KIND_FILES) {
+				$this->filesStorage->delete($run, $attachment);
+			} else {
+				$this->storage->delete($run->getId(), $attachment->getStepId(), $attachment->getStorageKey());
+			}
 			$this->attachments->delete($attachment);
 		});
+	}
+
+	/**
+	 * Enforce that new evidence is only ever written to Nextcloud Files.
+	 *
+	 * A run with a complete managed-folder identity proceeds. A legacy run (no
+	 * destination identity at all) has no managed folder yet and fails closed
+	 * until it is migrated (#55); a partially populated or corrupt identity is
+	 * invalid. AppData is never used as a fallback.
+	 *
+	 * @throws ConflictException|ValidationException
+	 */
+	private function assertUploadDestinationUsable(Run $run): void {
+		$fileId = $run->getRunFolderFileId();
+		$storageId = $run->getRunFolderStorageId();
+		$hasFileId = $fileId !== null && $fileId > 0;
+		$hasStorageId = $storageId !== null && $storageId !== '';
+
+		if ($hasFileId && $hasStorageId) {
+			return;
+		}
+
+		if ($hasFileId || $hasStorageId) {
+			// A managed-folder identity must be complete; a partial one is
+			// corrupt, never a legacy run.
+			throw new ValidationException('destination_invalid_config');
+		}
+
+		$destinationMetadata = [
+			$run->getDestinationViewUid(),
+			$run->getDestinationSource(),
+			$run->getDestinationStorageId(),
+			$run->getDestinationFileId(),
+			$run->getDestinationPath(),
+			$run->getDestinationConfiguredBy(),
+			$run->getDestinationStorageRootId(),
+			$run->getDestinationMountType(),
+			$run->getDestinationMountProvider(),
+			$run->getDestinationMountId(),
+			$run->getDestinationNumericStorageId(),
+			$run->getRunFolderPath(),
+			$run->getRunFolderStorageRootId(),
+			$run->getRunFolderMountType(),
+			$run->getRunFolderMountProvider(),
+			$run->getRunFolderMountId(),
+			$run->getRunFolderNumericStorageId(),
+		];
+		if (array_filter($destinationMetadata, static fn (mixed $value): bool => $value !== null) !== []) {
+			// Destination metadata present but no managed folder: corrupt.
+			throw new ValidationException('destination_invalid_config');
+		}
+
+		// Legacy run (started before the Files milestone): no managed folder
+		// exists yet, so the upload fails closed until migration (#55).
+		throw new ConflictException('destination_unavailable');
+	}
+
+	/**
+	 * Write validated bytes into the run-managed folder and persist the
+	 * Files-backed attachment row. Shared by the upload (#50) and
+	 * copy-from-Files (#53) paths so identity resolution, metadata and cleanup
+	 * stay identical.
+	 *
+	 * Product rule: new evidence is always stored in Nextcloud Files, never in
+	 * AppData. A run without a usable managed folder fails closed instead of
+	 * falling back (legacy runs are migrated by #55). If metadata persistence
+	 * fails, only the file created by this attempt is removed.
+	 *
+	 * @throws ConflictException|ValidationException
+	 */
+	private function storeFilesAttachment(Run $run, int $stepId, string $filename, string $content, string $mimeType): Attachment {
+		$size = strlen($content);
+		$checksum = hash('sha256', $content);
+		$runId = $run->getId();
+		$now = $this->timeFactory->getTime();
+		$ownerUid = $run->getOwner();
+
+		$this->assertUploadDestinationUsable($run);
+		$file = $this->filesStorage->write($ownerUid, $run, $filename, $content);
+
+		try {
+			$attachment = new Attachment();
+			$attachment->setUuid($this->generateUuid());
+			$attachment->setRunId($runId);
+			$attachment->setStepId($stepId);
+			$attachment->setUploaderUid($this->currentUserId());
+			$attachment->setFilename($filename);
+			$attachment->setMimeType($mimeType);
+			$attachment->setSize($size);
+			$attachment->setChecksum($checksum);
+			$attachment->setCreatedAt($now);
+
+			$descriptor = $this->filesStorage->describe($file);
+			$attachment->setStorageKind(Attachment::STORAGE_KIND_FILES);
+			$attachment->setStorageKey('');
+			$attachment->setFileId($descriptor['fileId']);
+			$attachment->setStorageId($descriptor['storageId']);
+			$attachment->setStorageRootId($descriptor['storageRootId']);
+			$attachment->setMountType($descriptor['mountType']);
+			$attachment->setMountProvider($descriptor['mountProvider']);
+			$attachment->setMountId($descriptor['mountId']);
+			$attachment->setNumericStorageId($descriptor['numericStorageId']);
+			$attachment->setPath($descriptor['path']);
+
+			$attachment = $this->attachments->insert($attachment);
+		} catch (\Throwable $exception) {
+			// Metadata creation failed: never leave an orphan file behind.
+			$this->filesStorage->deleteNode($file);
+			throw $exception;
+		}
+
+		$this->activity->record($runId, $stepId, ActivityType::AttachmentUploaded, [
+			'attachmentId' => $attachment->getId(),
+			'filename' => $filename,
+			'mimeType' => $mimeType,
+			'size' => $size,
+		], $this->currentUserId());
+
+		return $attachment;
+	}
+
+	/**
+	 * Read the advisory source path from the copy request body (issue #53).
+	 *
+	 * @param array<string, mixed> $data
+	 *
+	 * @throws ValidationException
+	 */
+	private function readSourcePath(array $data): string {
+		if (!array_key_exists('sourcePath', $data) || $data['sourcePath'] === null) {
+			throw new ValidationException('attachment_source_required');
+		}
+		if (!is_string($data['sourcePath'])) {
+			throw new ValidationException('invalid_field');
+		}
+		$path = trim($data['sourcePath']);
+		if ($path === '') {
+			throw new ValidationException('attachment_source_required');
+		}
+
+		return $path;
 	}
 
 	private function requireAttachment(int $id): Attachment {
@@ -199,6 +397,10 @@ class AttachmentService {
 		$name = preg_replace('/[\x00-\x1F\x7F]/u', '', $name) ?? '';
 		$name = trim($name);
 		if ($name === '') {
+			throw new ValidationException('attachment_invalid_filename');
+		}
+		if (strcasecmp($name, RunDestinationResolver::MARKER_FILE_NAME) === 0) {
+			// The reserved ownership marker must never be uploaded as evidence.
 			throw new ValidationException('attachment_invalid_filename');
 		}
 		if (mb_strlen($name) > self::MAX_FILENAME_LENGTH) {

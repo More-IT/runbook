@@ -18,6 +18,8 @@ return [
 		['name' => 'template#unarchive', 'url' => '/api/v1/templates/{id}/unarchive', 'verb' => 'POST'],
 		['name' => 'template#duplicate', 'url' => '/api/v1/templates/{id}/duplicate', 'verb' => 'POST'],
 		['name' => 'template#export', 'url' => '/api/v1/templates/{id}/export', 'verb' => 'GET'],
+		['name' => 'template#update_destination', 'url' => '/api/v1/templates/{id}/destination', 'verb' => 'PUT'],
+		['name' => 'template#clear_destination', 'url' => '/api/v1/templates/{id}/destination', 'verb' => 'DELETE'],
 
 		['name' => 'section#create', 'url' => '/api/v1/templates/{templateId}/sections', 'verb' => 'POST'],
 		['name' => 'section#update', 'url' => '/api/v1/sections/{id}', 'verb' => 'PATCH'],
@@ -61,6 +63,7 @@ return [
 
 		['name' => 'attachment#index', 'url' => '/api/v1/runs/{id}/attachments', 'verb' => 'GET'],
 		['name' => 'attachment#create', 'url' => '/api/v1/run-steps/{id}/attachments', 'verb' => 'POST'],
+		['name' => 'attachment#copy', 'url' => '/api/v1/run-steps/{id}/attachments/copy', 'verb' => 'POST'],
 		['name' => 'attachment#show', 'url' => '/api/v1/attachments/{id}', 'verb' => 'GET'],
 		['name' => 'attachment#destroy', 'url' => '/api/v1/attachments/{id}', 'verb' => 'DELETE'],
 
@@ -68,7 +71,12 @@ return [
 
 		['name' => 'admin_settings#index', 'url' => '/api/v1/admin/settings', 'verb' => 'GET'],
 		['name' => 'admin_settings#update', 'url' => '/api/v1/admin/settings', 'verb' => 'PUT'],
+		['name' => 'admin_settings#update_destination', 'url' => '/api/v1/admin/settings/destination', 'verb' => 'PUT'],
+		['name' => 'admin_settings#clear_destination', 'url' => '/api/v1/admin/settings/destination', 'verb' => 'DELETE'],
 		['name' => 'admin_settings#features', 'url' => '/api/v1/features', 'verb' => 'GET'],
+
+		['name' => 'migration#index', 'url' => '/api/v1/admin/migration', 'verb' => 'GET'],
+		['name' => 'migration#run', 'url' => '/api/v1/admin/migration', 'verb' => 'POST'],
 
 		['name' => 'work#my_work', 'url' => '/api/v1/my-work', 'verb' => 'GET'],
 		['name' => 'work#overview', 'url' => '/api/v1/overview', 'verb' => 'GET'],

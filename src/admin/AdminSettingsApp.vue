@@ -4,9 +4,10 @@
 -->
 
 <script setup lang="ts">
-import type { AdminSettingsBounds, AdminSettingsValues, TemplateCreationPolicy } from '../models/adminSettings.ts'
+import type { AdminDestinationState, AdminSettingsBounds, AdminSettingsValues, TemplateCreationPolicy } from '../models/adminSettings.ts'
 import type { Principal } from '../models/template.ts'
 
+import { FilePickerClosed, FilePickerType, getFilePickerBuilder } from '@nextcloud/dialogs'
 import { translate as t } from '@nextcloud/l10n'
 import { computed, onMounted, reactive, ref } from 'vue'
 import NcButton from '@nextcloud/vue/components/NcButton'
@@ -15,8 +16,9 @@ import NcLoadingIcon from '@nextcloud/vue/components/NcLoadingIcon'
 import NcNoteCard from '@nextcloud/vue/components/NcNoteCard'
 import NcSelect from '@nextcloud/vue/components/NcSelect'
 import NcTextField from '@nextcloud/vue/components/NcTextField'
-import { getAdminSettings, saveAdminSettings } from '../services/adminSettings.ts'
+import { clearAdminDestination, getAdminSettings, saveAdminDestination, saveAdminSettings } from '../services/adminSettings.ts'
 import { searchPrincipals } from '../services/templates.ts'
+import { destinationPath, destinationStatus, destinationStatusText, EMPTY_DESTINATION_STATE, selectedPathFromPicker } from '../utils/adminDestination.ts'
 import { apiErrorMessage } from '../utils/apiError.ts'
 
 interface PolicyOption {
@@ -51,6 +53,16 @@ const bounds = ref<AdminSettingsBounds>({
 	maxAttachmentSize: 1073741824,
 	maxRetentionDays: 36500,
 })
+
+// Global administration destination folder (issue #47).
+const destination = ref<AdminDestinationState>({ ...EMPTY_DESTINATION_STATE })
+const destinationSaving = ref(false)
+const destinationError = ref<string | null>(null)
+const destinationSaved = ref(false)
+
+const destinationStatusValue = computed(() => destinationStatus(destination.value))
+const destinationDisplayPath = computed(() => destinationPath(destination.value))
+const destinationStatusMessage = computed(() => destinationStatusText(t, destination.value))
 
 const groupOptions = ref<Principal[]>([])
 const groupLoading = ref(false)
@@ -90,6 +102,7 @@ async function load(): Promise<void> {
 	try {
 		const data = await getAdminSettings()
 		apply(data.settings, data.bounds)
+		destination.value = data.destination ?? { ...EMPTY_DESTINATION_STATE }
 	} catch (caught) {
 		error.value = apiErrorMessage(caught)
 	} finally {
@@ -176,12 +189,77 @@ function removeGroup(id: string): void {
 }
 
 /**
+ * Open the Nextcloud Files picker and save the selected folder as the global
+ * destination reference (issue #47).
+ */
+async function selectDestination(): Promise<void> {
+	destinationError.value = null
+	destinationSaved.value = false
+
+	let picked: unknown
+	try {
+		picked = await getFilePickerBuilder(t('runbook', 'Select destination folder'))
+			.setMultiSelect(false)
+			.allowDirectories(true)
+			.setType(FilePickerType.Choose)
+			.build()
+			.pick()
+	} catch (caught) {
+		if (caught instanceof FilePickerClosed) {
+			return
+		}
+		destinationError.value = apiErrorMessage(caught)
+		return
+	}
+
+	const path = selectedPathFromPicker(picked)
+	if (path === null) {
+		return
+	}
+
+	await persistDestination(path)
+}
+
+/**
+ * Persist the selected folder path (server-side re-resolution).
+ *
+ * @param path Selected folder path.
+ */
+async function persistDestination(path: string): Promise<void> {
+	destinationSaving.value = true
+	try {
+		destination.value = await saveAdminDestination(path)
+		destinationSaved.value = true
+	} catch (caught) {
+		destinationError.value = apiErrorMessage(caught)
+	} finally {
+		destinationSaving.value = false
+	}
+}
+
+/**
+ * Remove the configured global destination, restoring the default behaviour.
+ */
+async function removeDestination(): Promise<void> {
+	destinationError.value = null
+	destinationSaved.value = false
+	destinationSaving.value = true
+	try {
+		destination.value = await clearAdminDestination()
+		destinationSaved.value = true
+	} catch (caught) {
+		destinationError.value = apiErrorMessage(caught)
+	} finally {
+		destinationSaving.value = false
+	}
+}
+
+/**
  * Validate and save the settings.
  */
 async function save(): Promise<void> {
 	error.value = null
 	saved.value = false
-
 	if (form.maxAttachmentSize < bounds.value.minAttachmentSize || form.maxAttachmentSize > bounds.value.maxAttachmentSize) {
 		error.value = t('runbook', 'The maximum attachment size is out of range.')
 		return
@@ -226,6 +304,40 @@ async function save(): Promise<void> {
 			<NcNoteCard v-else-if="saved" type="success">
 				{{ t('runbook', 'Runbook settings saved.') }}
 			</NcNoteCard>
+
+			<section class="runbook-admin-settings__section">
+				<h3>{{ t('runbook', 'Destination folder') }}</h3>
+				<p class="runbook-admin-settings__hint">
+					{{ t('runbook', 'New runs store their evidence in Nextcloud Files. Choose a folder that every run owner can write to. This setting is used when neither the template nor the person starting the run chooses a folder.') }}
+				</p>
+				<NcNoteCard v-if="destinationError" type="error">
+					{{ destinationError }}
+				</NcNoteCard>
+				<NcNoteCard v-else-if="destinationSaved" type="success">
+					{{ t('runbook', 'Destination folder updated.') }}
+				</NcNoteCard>
+				<NcNoteCard v-else-if="destinationStatusValue === 'invalid'" type="warning">
+					{{ destinationStatusMessage }}
+				</NcNoteCard>
+				<div class="runbook-admin-settings__destination">
+					<span class="runbook-admin-settings__destination-path">
+						{{ destinationDisplayPath ?? t('runbook', 'Not configured') }}
+					</span>
+					<NcButton :disabled="destinationSaving" @click="selectDestination">
+						{{ destinationStatusValue === 'unset' ? t('runbook', 'Select folder') : t('runbook', 'Change folder') }}
+					</NcButton>
+					<NcButton
+						v-if="destinationStatusValue !== 'unset'"
+						variant="error"
+						:disabled="destinationSaving"
+						@click="removeDestination">
+						{{ t('runbook', 'Remove') }}
+					</NcButton>
+				</div>
+				<p class="runbook-admin-settings__hint">
+					{{ destinationStatusMessage }}
+				</p>
+			</section>
 
 			<section class="runbook-admin-settings__section">
 				<h3>{{ t('runbook', 'Templates') }}</h3>
@@ -375,6 +487,19 @@ async function save(): Promise<void> {
 	align-items: center;
 	gap: 8px;
 	margin-top: 8px;
+}
+
+.runbook-admin-settings__destination {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 8px 0;
+}
+
+.runbook-admin-settings__destination-path {
+	flex: 1 1 auto;
+	font-weight: bold;
+	overflow-wrap: anywhere;
 }
 
 .runbook-admin-settings__actions {

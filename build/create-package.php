@@ -38,6 +38,7 @@ $includeFiles = [
 	// the relative links in README.md (validate-package.php checks them).
 	'docs/ux-architecture.md',
 	'docs/manual-acceptance-checklist.md',
+	'docs/folder-model.md',
 ];
 
 removeDirectory($stagingParent);

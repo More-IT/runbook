@@ -6,7 +6,9 @@ namespace OCA\Runbook\Controller;
 
 use OCA\Runbook\Service\AdminSettings;
 use OCA\Runbook\Service\ForbiddenException;
+use OCA\Runbook\Service\RunDestinationResolver;
 use OCA\Runbook\Service\TemplateCreationPolicyService;
+use OCA\Runbook\Service\ValidationException;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\JSONResponse;
@@ -28,6 +30,7 @@ class AdminSettingsController extends ApiController {
 		IRequest $request,
 		private readonly AdminSettings $settings,
 		private readonly TemplateCreationPolicyService $creationPolicy,
+		private readonly RunDestinationResolver $destinations,
 		private readonly IUserSession $userSession,
 		private readonly IGroupManager $groupManager,
 	) {
@@ -35,12 +38,13 @@ class AdminSettingsController extends ApiController {
 	}
 
 	/**
-	 * @return JSONResponse<Http::STATUS_OK, array{settings: array<string, mixed>, bounds: array<string, int>}, array{}>
+	 * @return JSONResponse<Http::STATUS_OK, array{settings: array<string, mixed>, bounds: array<string, int>, destination: array<string, mixed>}, array{}>
 	 */
 	public function index(): JSONResponse {
 		return new JSONResponse([
 			'settings' => $this->settings->getAll(),
 			'bounds' => $this->settings->getBounds(),
+			'destination' => $this->settings->describeDestination(),
 		]);
 	}
 
@@ -55,6 +59,46 @@ class AdminSettingsController extends ApiController {
 			'settings' => $updated,
 			'bounds' => $this->settings->getBounds(),
 		]);
+	}
+
+	/**
+	 * Save the global administration destination folder (#47).
+	 *
+	 * The client submits a user-visible path from the authenticated
+	 * administrator's own Files; the folder is re-resolved server-side and its
+	 * identity is captured there. A failed save never changes the stored
+	 * reference.
+	 *
+	 * @return JSONResponse<Http::STATUS_OK, array{destination: array<string, mixed>}, array{}>
+	 */
+	public function updateDestination(): JSONResponse {
+		$uid = $this->currentUserId();
+		$path = $this->request->getParam('path');
+		if (!is_string($path)) {
+			throw new ValidationException('invalid_field');
+		}
+
+		$reference = $this->destinations->captureReference($uid, $path);
+		$this->settings->saveDestinationReference(
+			$reference->storageId,
+			$reference->fileId,
+			$reference->path,
+			$uid,
+		);
+
+		return new JSONResponse(['destination' => $this->settings->describeDestination()]);
+	}
+
+	/**
+	 * Clear the global administration destination folder (#47), restoring the
+	 * explicit unset state and the #46 default behaviour.
+	 *
+	 * @return JSONResponse<Http::STATUS_OK, array{destination: array<string, mixed>}, array{}>
+	 */
+	public function clearDestination(): JSONResponse {
+		$this->settings->clearDestinationReference();
+
+		return new JSONResponse(['destination' => $this->settings->describeDestination()]);
 	}
 
 	/**

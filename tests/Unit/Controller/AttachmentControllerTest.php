@@ -55,14 +55,19 @@ class AttachmentControllerTest extends TestCase {
 
 	public function testIndexReturnsAttachmentsWithoutStorageKey(): void {
 		$this->attachmentService->expects(self::once())
-			->method('listForRun')
+			->method('describeForRun')
 			->with(1)
-			->willReturn([$this->attachment()]);
+			->willReturn([
+				'attachments' => [['attachment' => $this->attachment(), 'fileState' => 'present']],
+				'degraded' => false,
+			]);
 
 		$response = $this->controller(['id' => '1'])->index();
 
 		self::assertSame(200, $response->getStatus());
 		self::assertSame('evidence.txt', $response->getData()['attachments'][0]['filename']);
+		self::assertSame('present', $response->getData()['attachments'][0]['fileState']);
+		self::assertFalse($response->getData()['degraded']);
 		self::assertArrayNotHasKey('storageKey', $response->getData()['attachments'][0]);
 	}
 
@@ -84,6 +89,34 @@ class AttachmentControllerTest extends TestCase {
 
 		$this->expectException(ValidationException::class);
 		$this->controller(['id' => '7'], null)->create();
+	}
+
+	public function testCopyReturnsCreatedAttachment(): void {
+		$this->attachmentService->expects(self::once())
+			->method('copyFromFiles')
+			->with(7, ['sourcePath' => '/Documents/report.txt'])
+			->willReturn($this->attachment());
+
+		$response = $this->controller(['id' => '7', 'sourcePath' => '/Documents/report.txt'])->copy();
+
+		self::assertSame(201, $response->getStatus());
+		self::assertSame('evidence.txt', $response->getData()['attachment']['filename']);
+	}
+
+	public function testCopyIgnoresClientSuppliedIdentityFields(): void {
+		// Only sourcePath is forwarded; a client-provided file/storage id can
+		// never reach the service as a trusted identity.
+		$this->attachmentService->expects(self::once())
+			->method('copyFromFiles')
+			->with(7, ['sourcePath' => '/Documents/report.txt'])
+			->willReturn($this->attachment());
+
+		$this->controller([
+			'id' => '7',
+			'sourcePath' => '/Documents/report.txt',
+			'fileId' => '999',
+			'storageId' => 'evil',
+		])->copy();
 	}
 
 	public function testDestroyReturnsSuccess(): void {

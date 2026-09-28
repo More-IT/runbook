@@ -10,6 +10,7 @@ use OCA\Runbook\Db\TemplateStep;
 use OCA\Runbook\Service\TemplateExportService;
 use OCA\Runbook\Service\TemplateImportService;
 use OCA\Runbook\Service\TemplateService;
+use OCA\Runbook\Service\ValidationException;
 use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\AppFramework\Http\JSONResponse;
@@ -60,7 +61,7 @@ class TemplateController extends ApiController {
 	}
 
 	/**
-	 * @return JSONResponse<Http::STATUS_OK, array{template: TemplateData, sections: list<array{section: SectionData, steps: list<StepData>}>, permissions: array{role: string|null, canView: bool, canExecute: bool, canEdit: bool, canManageAcl: bool, canDelete: bool}}, array{}>
+	 * @return JSONResponse<Http::STATUS_OK, array{template: TemplateData, sections: list<array{section: SectionData, steps: list<StepData>}>, permissions: array{role: string|null, canView: bool, canExecute: bool, canEdit: bool, canManageAcl: bool, canDelete: bool}, destination: array{configured: bool, valid: bool, path: string|null, configuredBy: string|null}}, array{}>
 	 */
 	#[NoAdminRequired]
 	public function show(): JSONResponse {
@@ -80,6 +81,48 @@ class TemplateController extends ApiController {
 			'template' => $template->toArray(),
 			'sections' => $sections,
 			'permissions' => $this->templateService->getPermissions($template),
+			'destination' => $this->templateService->getTemplateDestinationState($template),
+		]);
+	}
+
+	/**
+	 * Save (or replace) the optional destination folder reference of a template
+	 * (issue #48).
+	 *
+	 * The client submits a user-visible path from its own Files view; the folder
+	 * is re-resolved and its identity captured server-side. Edit permission and
+	 * the non-archived lifecycle rule are enforced by the service; a failed save
+	 * never replaces a previously valid destination.
+	 *
+	 * @return JSONResponse<Http::STATUS_OK, array{template: TemplateData, destination: array{configured: bool, valid: bool, path: string|null, configuredBy: string|null}}, array{}>
+	 */
+	#[NoAdminRequired]
+	public function updateDestination(): JSONResponse {
+		$path = $this->request->getParam('path');
+		if (!is_string($path) || trim($path) === '') {
+			throw new ValidationException('invalid_field');
+		}
+
+		$template = $this->templateService->setTemplateDestination($this->requireId('id'), $path);
+
+		return new JSONResponse([
+			'template' => $template->toArray(),
+			'destination' => $this->templateService->getTemplateDestinationState($template),
+		]);
+	}
+
+	/**
+	 * Clear the optional destination folder reference of a template (issue #48).
+	 *
+	 * @return JSONResponse<Http::STATUS_OK, array{template: TemplateData, destination: array{configured: bool, valid: bool, path: string|null, configuredBy: string|null}}, array{}>
+	 */
+	#[NoAdminRequired]
+	public function clearDestination(): JSONResponse {
+		$template = $this->templateService->clearTemplateDestination($this->requireId('id'));
+
+		return new JSONResponse([
+			'template' => $template->toArray(),
+			'destination' => $this->templateService->getTemplateDestinationState($template),
 		]);
 	}
 

@@ -17,8 +17,12 @@ use OCP\IRequest;
  * JSON and download endpoints for run step evidence.
  *
  * @phpstan-import-type AttachmentData from Attachment
+ * @phpstan-import-type AttachmentDataWithState from Attachment
  */
 class AttachmentController extends ApiController {
+	/** Request fields accepted by {@see self::copy()} (issue #53). */
+	private const COPY_FIELDS = ['sourcePath'];
+
 	public function __construct(
 		string $appName,
 		IRequest $request,
@@ -28,16 +32,20 @@ class AttachmentController extends ApiController {
 	}
 
 	/**
-	 * @return JSONResponse<Http::STATUS_OK, array{attachments: list<AttachmentData>}, array{}>
+	 * @return JSONResponse<Http::STATUS_OK, array{attachments: list<AttachmentDataWithState>, degraded: bool}, array{}>
 	 */
 	#[NoAdminRequired]
 	public function index(): JSONResponse {
+		$described = $this->attachmentService->describeForRun($this->requireId('id'));
 		$attachments = array_map(
-			static fn (Attachment $attachment): array => $attachment->toArray(),
-			$this->attachmentService->listForRun($this->requireId('id')),
+			static fn (array $entry): array => $entry['attachment']->toArrayWithState($entry['fileState']),
+			$described['attachments'],
 		);
 
-		return new JSONResponse(['attachments' => $attachments]);
+		return new JSONResponse([
+			'attachments' => $attachments,
+			'degraded' => $described['degraded'],
+		]);
 	}
 
 	/**
@@ -51,6 +59,23 @@ class AttachmentController extends ApiController {
 		}
 
 		$attachment = $this->attachmentService->upload($this->requireId('id'), $file);
+
+		return new JSONResponse(['attachment' => $attachment->toArray()], Http::STATUS_CREATED);
+	}
+
+	/**
+	 * Attach a copy of an existing Files item as evidence (issue #53).
+	 *
+	 * The client submits only an advisory `sourcePath` inside its own Files; the
+	 * server resolves and authorises the source, copies the bytes into the run
+	 * owner's managed folder and returns the new attachment. The original file is
+	 * never modified.
+	 *
+	 * @return JSONResponse<Http::STATUS_CREATED, array{attachment: AttachmentData}, array{}>
+	 */
+	#[NoAdminRequired]
+	public function copy(): JSONResponse {
+		$attachment = $this->attachmentService->copyFromFiles($this->requireId('id'), $this->body(self::COPY_FIELDS));
 
 		return new JSONResponse(['attachment' => $attachment->toArray()], Http::STATUS_CREATED);
 	}

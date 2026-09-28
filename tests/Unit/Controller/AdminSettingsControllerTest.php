@@ -6,19 +6,26 @@ namespace OCA\Runbook\Tests\Unit\Controller;
 
 use OCA\Runbook\Controller\AdminSettingsController;
 use OCA\Runbook\Service\AdminSettings;
+use OCA\Runbook\Service\DestinationReference;
+use OCA\Runbook\Service\RunDestinationResolver;
 use OCA\Runbook\Service\TemplateCreationPolicyService;
+use OCA\Runbook\Service\ValidationException;
+use OCP\AppFramework\Http\Attribute\NoAdminRequired;
 use OCP\IGroupManager;
 use OCP\IRequest;
 use OCP\IUser;
 use OCP\IUserSession;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use ReflectionMethod;
 
 class AdminSettingsControllerTest extends TestCase {
 	/** @var AdminSettings&MockObject */
 	private AdminSettings $settings;
 	/** @var TemplateCreationPolicyService&MockObject */
 	private TemplateCreationPolicyService $creationPolicy;
+	/** @var RunDestinationResolver&MockObject */
+	private RunDestinationResolver $destinations;
 	/** @var IGroupManager&MockObject */
 	private IGroupManager $groupManager;
 
@@ -30,6 +37,7 @@ class AdminSettingsControllerTest extends TestCase {
 			'commentsEnabled' => true,
 		]);
 		$this->creationPolicy = $this->createMock(TemplateCreationPolicyService::class);
+		$this->destinations = $this->createMock(RunDestinationResolver::class);
 		$this->groupManager = $this->createMock(IGroupManager::class);
 		$this->groupManager->method('isAdmin')->willReturn(false);
 	}
@@ -52,7 +60,7 @@ class AdminSettingsControllerTest extends TestCase {
 		$session = $this->createMock(IUserSession::class);
 		$session->method('getUser')->willReturn($user);
 
-		return new AdminSettingsController('runbook', $request, $this->settings, $this->creationPolicy, $session, $this->groupManager);
+		return new AdminSettingsController('runbook', $request, $this->settings, $this->creationPolicy, $this->destinations, $session, $this->groupManager);
 	}
 
 	public function testIndexReturnsSettingsAndBounds(): void {
@@ -102,5 +110,76 @@ class AdminSettingsControllerTest extends TestCase {
 		self::assertTrue($features['canCreateTemplates']);
 		self::assertSame('bob', $features['uid']);
 		self::assertFalse($features['isAdmin']);
+		self::assertArrayNotHasKey('destination', $features, 'the protected destination setting must not leak to ordinary users');
+	}
+
+	public function testIndexIncludesDestinationState(): void {
+		$this->settings->method('getAll')->willReturn(['commentsEnabled' => true]);
+		$this->settings->method('getBounds')->willReturn(['minAttachmentSize' => 1024, 'maxAttachmentSize' => 1073741824, 'maxRetentionDays' => 36500]);
+		$this->settings->method('describeDestination')->willReturn([
+			'configured' => true,
+			'valid' => true,
+			'path' => '/Shared/Reports',
+			'configuredBy' => 'admin',
+		]);
+
+		$response = $this->controller([])->index();
+
+		self::assertSame(200, $response->getStatus());
+		self::assertSame('/Shared/Reports', $response->getData()['destination']['path']);
+	}
+
+	public function testUpdateDestinationSavesCapturedIdentity(): void {
+		$this->destinations->expects(self::once())
+			->method('captureReference')
+			->with('admin', '/Shared/Reports')
+			->willReturn(new DestinationReference('home::admin', 4242, '/Shared/Reports', 'admin'));
+		$this->settings->expects(self::once())
+			->method('saveDestinationReference')
+			->with('home::admin', 4242, '/Shared/Reports', 'admin')
+			->willReturn(new DestinationReference('home::admin', 4242, '/Shared/Reports', 'admin'));
+		$this->settings->method('describeDestination')->willReturn([
+			'configured' => true,
+			'valid' => true,
+			'path' => '/Shared/Reports',
+			'configuredBy' => 'admin',
+		]);
+
+		$response = $this->controller(['path' => '/Shared/Reports'])->updateDestination();
+
+		self::assertSame(200, $response->getStatus());
+		self::assertSame('/Shared/Reports', $response->getData()['destination']['path']);
+	}
+
+	public function testUpdateDestinationRejectsNonStringPath(): void {
+		$this->destinations->expects(self::never())->method('captureReference');
+
+		$this->expectException(ValidationException::class);
+		$this->controller(['path' => 123])->updateDestination();
+	}
+
+	public function testClearDestinationResetsTheReference(): void {
+		$this->settings->expects(self::once())->method('clearDestinationReference');
+		$this->settings->method('describeDestination')->willReturn([
+			'configured' => false,
+			'valid' => false,
+			'path' => null,
+			'configuredBy' => null,
+		]);
+
+		$response = $this->controller([])->clearDestination();
+
+		self::assertSame(200, $response->getStatus());
+		self::assertFalse($response->getData()['destination']['configured']);
+	}
+
+	public function testProtectedEndpointsAreAdminOnly(): void {
+		foreach (['index', 'update', 'updateDestination', 'clearDestination'] as $method) {
+			$attributes = (new ReflectionMethod(AdminSettingsController::class, $method))->getAttributes(NoAdminRequired::class);
+			self::assertSame([], $attributes, $method . ' must stay administrator-only');
+		}
+
+		$featuresAttributes = (new ReflectionMethod(AdminSettingsController::class, 'features'))->getAttributes(NoAdminRequired::class);
+		self::assertNotSame([], $featuresAttributes, 'features must remain available to authenticated users');
 	}
 }

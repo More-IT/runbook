@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\Runbook\Service;
 
 use OCA\Runbook\Db\ActivityEvent;
+use OCA\Runbook\Db\Attachment;
 use OCA\Runbook\Db\AttachmentMapper;
 use OCA\Runbook\Db\Run;
 use OCA\Runbook\Db\RunAclMapper;
@@ -61,8 +62,13 @@ class RunService {
 		private readonly AdminSettings $settings,
 		private readonly AttachmentMapper $attachments,
 		private readonly EvidenceStorage $evidenceStorage,
+		private readonly FilesAttachmentStorage $filesStorage,
+		private readonly AttachmentReconciliationService $reconciliation,
 		private readonly IGroupManager $groupManager,
 		private readonly FlowService $flow,
+		private readonly RunDestinationResolver $destinations,
+		private readonly TemplateDestinationService $templateDestinations,
+		private readonly FilesCleanupService $filesCleanup,
 	) {
 	}
 
@@ -115,6 +121,17 @@ class RunService {
 			throw new ValidationException('description_too_long');
 		}
 
+		// Optional one-time run-time destination (#49). Only a user-visible path
+		// is accepted; any storage/file id supplied by the client is ignored and
+		// the identity is captured server-side from the starter's own Files view.
+		$runtimePath = $this->readString($data, 'destinationPath');
+		if ($runtimePath !== null) {
+			$runtimePath = trim($runtimePath);
+			if ($runtimePath === '') {
+				$runtimePath = null;
+			}
+		}
+
 		$now = $this->timeFactory->getTime();
 		$dueAt = $this->readTimestamp($data, 'dueAt');
 		if ($dueAt !== null && $dueAt < $now) {
@@ -134,103 +151,120 @@ class RunService {
 		$run->setDueAt($dueAt);
 		$run->setUpdatedAt($now);
 
+		// Resolve and prepare the Files destination *before* creating the run
+		// row. Files and the database share no transaction, so a later failure
+		// leaves the managed folder in place: it is preserved (never deleted
+		// recursively, issues #46/#54) as an orphan requiring manual cleanup,
+		// because this attempt's UUID is not reused by a later start.
+		$templateReference = $this->templateDestinations->readReference($template);
+		$runtimeReference = $runtimePath === null
+			? null
+			: $this->destinations->captureReference($uid, $runtimePath);
+		$destination = $this->destinations->resolveForRun($uid, $run->getUuid(), $title, $templateReference, $runtimeReference);
+		$this->destinations->applyToRun($run, $destination);
+
 		/** @var list<RunStep> $assignedSteps */
 		$assignedSteps = [];
 		/** @var list<RunStep> $autoAssignedSteps */
 		$autoAssignedSteps = [];
-		$stored = $this->transactionRunner->run(function () use ($template, $run, $now, $dueAt, &$assignedSteps, &$autoAssignedSteps, $uid): Run {
-			$stored = $this->runs->insert($run);
+		try {
+			$stored = $this->transactionRunner->run(function () use ($template, $run, $now, $dueAt, &$assignedSteps, &$autoAssignedSteps, $uid): Run {
+				$stored = $this->runs->insert($run);
 
-			/** @var array<int, int> $sectionIdMap template section id => run section id */
-			$sectionIdMap = [];
-			/** @var array<int, int> $stepIdMap template step id => run step id */
-			$stepIdMap = [];
-			/** @var list<array{0: \OCA\Runbook\Db\TemplateSection, 1: RunSection}> $createdSections */
-			$createdSections = [];
+				/** @var array<int, int> $sectionIdMap template section id => run section id */
+				$sectionIdMap = [];
+				/** @var array<int, int> $stepIdMap template step id => run step id */
+				$stepIdMap = [];
+				/** @var list<array{0: \OCA\Runbook\Db\TemplateSection, 1: RunSection}> $createdSections */
+				$createdSections = [];
 
-			foreach ($this->templateSections->findByTemplate($template->getId()) as $section) {
-				$runSection = new RunSection();
-				$runSection->setRunId($stored->getId());
-				$runSection->setSourceSectionId($section->getId());
-				$runSection->setTitle($section->getTitle());
-				$runSection->setDescription($section->getDescription());
-				$runSection->setNotes($section->getNotes());
-				$runSection->setPosition($section->getPosition());
-				$storedSection = $this->runSections->insert($runSection);
-				$sectionIdMap[$section->getId()] = $storedSection->getId();
-				$createdSections[] = [$section, $storedSection];
+				foreach ($this->templateSections->findByTemplate($template->getId()) as $section) {
+					$runSection = new RunSection();
+					$runSection->setRunId($stored->getId());
+					$runSection->setSourceSectionId($section->getId());
+					$runSection->setTitle($section->getTitle());
+					$runSection->setDescription($section->getDescription());
+					$runSection->setNotes($section->getNotes());
+					$runSection->setPosition($section->getPosition());
+					$storedSection = $this->runSections->insert($runSection);
+					$sectionIdMap[$section->getId()] = $storedSection->getId();
+					$createdSections[] = [$section, $storedSection];
 
-				foreach ($this->templateSteps->findBySection($section->getId()) as $step) {
-					$runStep = new RunStep();
-					$runStep->setRunSectionId($storedSection->getId());
-					$runStep->setSourceStepId($step->getId());
-					$runStep->setUuid($this->generateUuid());
-					$runStep->setTitle($step->getTitle());
-					$runStep->setDescription($step->getDescription());
-					$runStep->setType($step->getType());
-					$runStep->setRequired($step->getRequired());
-					$runStep->setPosition($step->getPosition());
-					$runStep->setConfigArray($step->getConfigArray());
-					$runStep->setStatus(RunStepStatus::Pending->value);
+					foreach ($this->templateSteps->findBySection($section->getId()) as $step) {
+						$runStep = new RunStep();
+						$runStep->setRunSectionId($storedSection->getId());
+						$runStep->setSourceStepId($step->getId());
+						$runStep->setUuid($this->generateUuid());
+						$runStep->setTitle($step->getTitle());
+						$runStep->setDescription($step->getDescription());
+						$runStep->setType($step->getType());
+						$runStep->setRequired($step->getRequired());
+						$runStep->setPosition($step->getPosition());
+						$runStep->setConfigArray($step->getConfigArray());
+						$runStep->setStatus(RunStepStatus::Pending->value);
 
-					// Unassigned template steps are assigned to the user who
-					// starts the run, so every step has an owner and appears in
-					// "My Work". Steps with a configured assignee keep it.
-					$assignee = $this->resolveDefaultAssignee($step->getDefaultAssignee());
-					$autoAssigned = false;
-					if ($assignee === null) {
-						$assignee = ['type' => PrincipalType::User, 'id' => $uid];
-						$autoAssigned = true;
-					}
-					$runStep->setAssigneeType($assignee['type']->value);
-					$runStep->setAssigneeId($assignee['id']);
-
-					$dueMinutes = $this->parseDueOffsetMinutes($step->getDueOffset());
-					if ($dueMinutes !== null) {
-						$stepDueAt = $now + $dueMinutes * 60;
-						if ($dueAt !== null && $stepDueAt > $dueAt) {
-							throw new ValidationException('step_due_after_run_due');
+						// Unassigned template steps are assigned to the user who
+						// starts the run, so every step has an owner and appears in
+						// "My Work". Steps with a configured assignee keep it.
+						$assignee = $this->resolveDefaultAssignee($step->getDefaultAssignee());
+						$autoAssigned = false;
+						if ($assignee === null) {
+							$assignee = ['type' => PrincipalType::User, 'id' => $uid];
+							$autoAssigned = true;
 						}
-						$runStep->setDueAt($stepDueAt);
-					}
+						$runStep->setAssigneeType($assignee['type']->value);
+						$runStep->setAssigneeId($assignee['id']);
 
-					$storedStep = $this->runSteps->insert($runStep);
-					$stepIdMap[$step->getId()] = $storedStep->getId();
-					if ($runStep->getAssigneeType() !== null && $runStep->getAssigneeId() !== null) {
-						$assignedSteps[] = $runStep;
-					}
-					if ($autoAssigned) {
-						$autoAssignedSteps[] = $runStep;
-					}
-				}
-			}
+						$dueMinutes = $this->parseDueOffsetMinutes($step->getDueOffset());
+						if ($dueMinutes !== null) {
+							$stepDueAt = $now + $dueMinutes * 60;
+							if ($dueAt !== null && $stepDueAt > $dueAt) {
+								throw new ValidationException('step_due_after_run_due');
+							}
+							$runStep->setDueAt($stepDueAt);
+						}
 
-			// Second pass: the flow configuration references template section and
-			// step ids, which only exist for the run after the first pass.
-			foreach ($createdSections as [$templateSection, $runSection]) {
-				$dependsOn = [];
-				foreach ($templateSection->getDependsOnIds() as $depId) {
-					if (isset($sectionIdMap[$depId])) {
-						$dependsOn[] = $sectionIdMap[$depId];
-					}
-				}
-
-				$mappedConditions = [];
-				foreach ($templateSection->getConditions() as $condition) {
-					$sourceStepId = (int)($condition['stepId'] ?? 0);
-					if (isset($stepIdMap[$sourceStepId])) {
-						$condition['stepId'] = $stepIdMap[$sourceStepId];
-						$mappedConditions[] = $condition;
+						$storedStep = $this->runSteps->insert($runStep);
+						$stepIdMap[$step->getId()] = $storedStep->getId();
+						if ($runStep->getAssigneeType() !== null && $runStep->getAssigneeId() !== null) {
+							$assignedSteps[] = $runStep;
+						}
+						if ($autoAssigned) {
+							$autoAssignedSteps[] = $runStep;
+						}
 					}
 				}
 
-				$runSection->setDependsOnIds($dependsOn);
-				$runSection->setConditions($mappedConditions);
-				$this->runSections->update($runSection);
-			}
+				// Second pass: the flow configuration references template section and
+				// step ids, which only exist for the run after the first pass.
+				foreach ($createdSections as [$templateSection, $runSection]) {
+					$dependsOn = [];
+					foreach ($templateSection->getDependsOnIds() as $depId) {
+						if (isset($sectionIdMap[$depId])) {
+							$dependsOn[] = $sectionIdMap[$depId];
+						}
+					}
 
-			return $stored;
-		});
+					$mappedConditions = [];
+					foreach ($templateSection->getConditions() as $condition) {
+						$sourceStepId = (int)($condition['stepId'] ?? 0);
+						if (isset($stepIdMap[$sourceStepId])) {
+							$condition['stepId'] = $stepIdMap[$sourceStepId];
+							$mappedConditions[] = $condition;
+						}
+					}
+
+					$runSection->setDependsOnIds($dependsOn);
+					$runSection->setConditions($mappedConditions);
+					$this->runSections->update($runSection);
+				}
+
+				return $stored;
+			});
+		} catch (\Throwable $exception) {
+			$this->destinations->compensate($destination);
+			throw $exception;
+		}
 
 		$this->activity->record($stored->getId(), null, ActivityType::RunStarted, ['title' => $title], $uid);
 
@@ -344,7 +378,7 @@ class RunService {
 	}
 
 	/**
-	 * @return array{run: Run, sections: list<array{section: RunSection, steps: list<RunStep>, state: string, blockedBy: list<string>, reason: list<array<string, mixed>>}>, progress: array{total: int, completed: int, skipped: int, pending: int, percentage: int, canComplete: bool}, permissions: array{uid: string, role: string|null, canManage: bool, canModify: bool, canCancel: bool, canReopen: bool, canManageAssignments: bool, canComment: bool, canDelete: bool, executableStepIds: list<int>}}
+	 * @return array{run: Run, sections: list<array{section: RunSection, steps: list<RunStep>, state: string, blockedBy: list<string>, reason: list<array<string, mixed>>}>, progress: array{total: int, completed: int, skipped: int, pending: int, percentage: int, canComplete: bool}, permissions: array{uid: string, role: string|null, canManage: bool, canModify: bool, canCancel: bool, canReopen: bool, canManageAssignments: bool, canComment: bool, canDelete: bool, executableStepIds: list<int>}, evidenceDegraded: bool, managedFolderState: string}
 	 */
 	public function getRunDetail(int $id): array {
 		$run = $this->requireAccessibleRun($id);
@@ -385,6 +419,8 @@ class RunService {
 			'sections' => $flowSections,
 			'progress' => $this->calculateProgress($run, $allSteps, $flow['inapplicableStepIds']),
 			'permissions' => $this->getPermissions($run, $allSteps, $unavailableStepIds),
+			'evidenceDegraded' => $this->reconciliation->degraded($run, $this->attachments->findByRun($run->getId())),
+			'managedFolderState' => $this->reconciliation->managedFolderState($run),
 		];
 	}
 
@@ -588,9 +624,13 @@ class RunService {
 	 * Permanently delete a run and every related record.
 	 *
 	 * The run owner or a Nextcloud administrator may delete a run in any state.
-	 * Evidence files are removed from AppData before the run row is deleted so
-	 * no orphaned files remain; sections, steps, ACL, activity, comments,
-	 * mentions and notification ledger rows cascade with the run.
+	 * Deletion is **fail closed for files** (issue #54): every tracked,
+	 * in-scope Files file is pre-flighted on its own node first; if any file
+	 * cannot be safely deleted, the whole deletion aborts with `run_delete_blocked`
+	 * and no database row is touched. Only once every tracked file is gone are
+	 * the durable managed-folder cleanup record and the run-row deletion written
+	 * in **one transaction**; the folder is then removed post-commit if it is
+	 * empty. Legacy AppData rows are removed exactly as before (never extended).
 	 */
 	public function deleteRun(int $id): void {
 		try {
@@ -604,11 +644,46 @@ class RunService {
 			throw new NotFoundException('run_not_found');
 		}
 
-		foreach ($this->attachments->findByRun($id) as $attachment) {
+		$attachments = $this->attachments->findByRun($id);
+		$files = [];
+		$appData = [];
+		foreach ($attachments as $attachment) {
+			if ($attachment->getStorageKind() === Attachment::STORAGE_KIND_FILES) {
+				$files[] = $attachment;
+			} else {
+				$appData[] = $attachment;
+			}
+		}
+
+		// Pre-flight + delete tracked Files evidence. A blocked file aborts the
+		// whole deletion before any database row is changed.
+		$result = $this->filesStorage->deleteTrackedEvidence($run, $files);
+		if ($result['blocked'] !== []) {
+			throw new ConflictException('run_delete_blocked');
+		}
+
+		// Legacy AppData evidence is removed exactly as before (#55 migrates it;
+		// #54 never introduces new AppData writes).
+		foreach ($appData as $attachment) {
 			$this->evidenceStorage->delete($id, $attachment->getStepId(), $attachment->getStorageKey());
 		}
 
-		$this->runs->delete($run);
+		$cleanup = $this->filesCleanup->buildRecord($run);
+
+		// Durable cleanup intent + run-row deletion are one atomic unit. If this
+		// fails, nothing is committed: the run and its attachment rows remain and
+		// no cleanup record exists, so the deletion can simply be retried.
+		$this->transactionRunner->run(function () use ($run, $cleanup): void {
+			if ($cleanup !== null) {
+				$this->filesCleanup->persist($cleanup);
+			}
+			$this->runs->delete($run);
+		});
+
+		// Post-commit folder cleanup; failures stay durable in the record.
+		if ($cleanup !== null) {
+			$this->filesCleanup->attempt($cleanup);
+		}
 	}
 
 	/**

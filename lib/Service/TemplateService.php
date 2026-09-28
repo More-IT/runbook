@@ -45,6 +45,7 @@ class TemplateService {
 		private readonly PermissionService $permissionService,
 		private readonly TemplateCreationPolicyService $creationPolicy,
 		private readonly IGroupManager $groupManager,
+		private readonly TemplateDestinationService $templateDestinations,
 	) {
 	}
 
@@ -151,6 +152,74 @@ class TemplateService {
 	public function deleteTemplate(int $id): void {
 		$template = $this->requireOwnerTemplate($id);
 		$this->templates->delete($template);
+	}
+
+	/**
+	 * Set (or replace) the optional destination folder reference for a template
+	 * (issue #48).
+	 *
+	 * The selected folder is captured server-side from the current user's own
+	 * Files view; the client only submits a user-visible path. Requires the edit
+	 * permission and a non-archived template, so viewers and unauthorized users
+	 * cannot change it.
+	 *
+	 * @throws ValidationException|ConflictException When the selection is not a
+	 *                                               writable folder the current
+	 *                                               user can reach.
+	 */
+	public function setTemplateDestination(int $id, string $path): Template {
+		$template = $this->loadTemplate($id);
+		$this->assertCanEditContent($template);
+
+		$reference = $this->templateDestinations->capture($this->currentUserId(), $path);
+
+		if ($template->getDestinationStorageId() === $reference->storageId
+			&& $template->getDestinationFileId() === $reference->fileId
+			&& $template->getDestinationPath() === $reference->path
+			&& $template->getDestinationConfiguredBy() === $reference->configuredBy) {
+			return $template;
+		}
+
+		$template->setDestinationStorageId($reference->storageId);
+		$template->setDestinationFileId($reference->fileId);
+		$template->setDestinationPath($reference->path);
+		$template->setDestinationConfiguredBy($reference->configuredBy);
+		$this->touch($template);
+
+		return $template;
+	}
+
+	/**
+	 * Clear the template destination, restoring the unset state (falls through to
+	 * the global administration destination, then the default).
+	 */
+	public function clearTemplateDestination(int $id): Template {
+		$template = $this->loadTemplate($id);
+		$this->assertCanEditContent($template);
+
+		if ($template->getDestinationStorageId() === null
+			&& $template->getDestinationFileId() === null
+			&& $template->getDestinationPath() === null
+			&& $template->getDestinationConfiguredBy() === null) {
+			return $template;
+		}
+
+		$template->setDestinationStorageId(null);
+		$template->setDestinationFileId(null);
+		$template->setDestinationPath(null);
+		$template->setDestinationConfiguredBy(null);
+		$this->touch($template);
+
+		return $template;
+	}
+
+	/**
+	 * UI/API description of the template destination (never exposes identity).
+	 *
+	 * @return array{configured: bool, valid: bool, path: string|null, configuredBy: string|null}
+	 */
+	public function getTemplateDestinationState(Template $template): array {
+		return $this->templateDestinations->describe($template);
 	}
 
 	public function publishTemplate(int $id): Template {

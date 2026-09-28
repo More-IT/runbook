@@ -17,10 +17,13 @@ use OCA\Runbook\Enum\PrincipalType;
 use OCA\Runbook\Enum\TemplateStatus;
 use OCA\Runbook\Service\AdminSettings;
 use OCA\Runbook\Service\ConflictException;
+use OCA\Runbook\Service\DestinationReference;
 use OCA\Runbook\Service\ForbiddenException;
 use OCA\Runbook\Service\PermissionService;
 use OCA\Runbook\Service\PrincipalValidator;
+use OCA\Runbook\Service\RunDestinationResolver;
 use OCA\Runbook\Service\TemplateCreationPolicyService;
+use OCA\Runbook\Service\TemplateDestinationService;
 use OCA\Runbook\Service\TemplateExportService;
 use OCA\Runbook\Service\TemplateImportService;
 use OCA\Runbook\Service\TemplateService;
@@ -75,7 +78,11 @@ class TemplateServiceTest extends TestCase {
 	private IUserManager $userManager;
 	/** @var IGroupManager&MockObject */
 	private IGroupManager $groupManager;
+	/** @var PermissionService */
 	private PermissionService $permissionService;
+	/** @var RunDestinationResolver&MockObject */
+	private RunDestinationResolver $destinationResolver;
+	private TemplateDestinationService $templateDestinationService;
 	private TemplateCreationPolicyService $creationPolicy;
 	/** @var array<string, mixed> */
 	private array $configValues = [];
@@ -309,6 +316,8 @@ class TemplateServiceTest extends TestCase {
 		});
 
 		$this->permissionService = new PermissionService($this->aclMapper, $this->userManager, $this->groupManager);
+		$this->destinationResolver = $this->createMock(RunDestinationResolver::class);
+		$this->templateDestinationService = new TemplateDestinationService($this->destinationResolver);
 	}
 
 	/**
@@ -381,6 +390,7 @@ class TemplateServiceTest extends TestCase {
 			$this->permissionService,
 			$this->creationPolicy,
 			$this->groupManager,
+			$this->templateDestinationService,
 		);
 	}
 
@@ -2644,6 +2654,140 @@ class TemplateServiceTest extends TestCase {
 			json_encode($exported, JSON_THROW_ON_ERROR),
 			json_encode($this->exportServiceFor('bob')->export($second->getId()), JSON_THROW_ON_ERROR),
 			'a second import/export cycle reproduces the same compact document',
+		);
+	}
+
+	public function testOwnerCanSetReplaceAndClearTemplateDestination(): void {
+		$this->addUser('alice');
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+
+		$this->destinationResolver->method('captureReference')->willReturnCallback(
+			fn (string $uid, string $path): DestinationReference => new DestinationReference(
+				'home::' . $uid,
+				$path === '/Other' ? 7002 : 7001,
+				$path,
+				$uid,
+			),
+		);
+
+		$updated = $service->setTemplateDestination($template->getId(), '/Shared');
+		self::assertSame('home::alice', $updated->getDestinationStorageId());
+		self::assertSame(7001, $updated->getDestinationFileId());
+		self::assertSame('/Shared', $updated->getDestinationPath());
+		self::assertSame('alice', $updated->getDestinationConfiguredBy());
+		self::assertSame(
+			['configured' => true, 'valid' => true, 'path' => '/Shared', 'configuredBy' => 'alice'],
+			$service->getTemplateDestinationState($updated),
+		);
+
+		$replaced = $service->setTemplateDestination($template->getId(), '/Other');
+		self::assertSame(7002, $replaced->getDestinationFileId());
+		self::assertSame('/Other', $replaced->getDestinationPath());
+
+		$cleared = $service->clearTemplateDestination($template->getId());
+		self::assertNull($cleared->getDestinationStorageId());
+		self::assertNull($cleared->getDestinationFileId());
+		self::assertNull($cleared->getDestinationPath());
+		self::assertNull($cleared->getDestinationConfiguredBy());
+		self::assertSame(
+			['configured' => false, 'valid' => false, 'path' => null, 'configuredBy' => null],
+			$service->getTemplateDestinationState($cleared),
+		);
+	}
+
+	public function testViewerCannotChangeTemplateDestination(): void {
+		$this->addUser('alice');
+		$this->addUser('bob');
+		$ownerService = $this->serviceFor('alice');
+		$template = $ownerService->createTemplate(['title' => 'Deploy']);
+		$this->seedAcl($template->getId(), PrincipalType::User->value, 'bob', AclRole::Viewer->value);
+
+		$this->destinationResolver->expects(self::never())->method('captureReference');
+
+		$viewer = $this->serviceFor('bob');
+		$this->expectException(ForbiddenException::class);
+		$viewer->setTemplateDestination($template->getId(), '/Shared');
+	}
+
+	public function testEditorCanChangeTemplateDestination(): void {
+		$this->addUser('alice');
+		$this->addUser('bob');
+		$ownerService = $this->serviceFor('alice');
+		$template = $ownerService->createTemplate(['title' => 'Deploy']);
+		$this->seedAcl($template->getId(), PrincipalType::User->value, 'bob', AclRole::Editor->value);
+
+		$this->destinationResolver->method('captureReference')->willReturn(
+			new DestinationReference('home::bob', 7001, '/Shared', 'bob'),
+		);
+
+		$editor = $this->serviceFor('bob');
+		$updated = $editor->setTemplateDestination($template->getId(), '/Shared');
+
+		self::assertSame(7001, $updated->getDestinationFileId());
+		self::assertSame('bob', $updated->getDestinationConfiguredBy());
+	}
+
+	public function testNonMemberCannotChangeTemplateDestination(): void {
+		$this->addUser('alice');
+		$this->addUser('mallory');
+		$ownerService = $this->serviceFor('alice');
+		$template = $ownerService->createTemplate(['title' => 'Deploy']);
+
+		$this->destinationResolver->expects(self::never())->method('captureReference');
+
+		$this->expectException(ForbiddenException::class);
+		$this->serviceFor('mallory')->setTemplateDestination($template->getId(), '/Shared');
+	}
+
+	public function testArchivedTemplateCannotChangeTemplateDestination(): void {
+		$this->addUser('alice');
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+		$service->archiveTemplate($template->getId());
+
+		$this->destinationResolver->expects(self::never())->method('captureReference');
+
+		$this->expectException(ConflictException::class);
+		$service->setTemplateDestination($template->getId(), '/Shared');
+	}
+
+	public function testFailedCaptureDoesNotReplacePreviousDestination(): void {
+		$this->addUser('alice');
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+
+		$this->destinationResolver->method('captureReference')->willReturnCallback(
+			function (string $uid, string $path): DestinationReference {
+				if ($path === '/Bad') {
+					throw new ValidationException('destination_invalid');
+				}
+
+				return new DestinationReference('home::' . $uid, 7001, $path, $uid);
+			},
+		);
+
+		$service->setTemplateDestination($template->getId(), '/Good');
+
+		try {
+			$service->setTemplateDestination($template->getId(), '/Bad');
+			self::fail('expected the invalid capture to abort the save');
+		} catch (ValidationException) {
+		}
+
+		$stored = $this->templateMapper->find($template->getId());
+		self::assertSame(7001, $stored->getDestinationFileId());
+		self::assertSame('/Good', $stored->getDestinationPath());
+	}
+
+	public function testGetTemplateDestinationStateReportsUnset(): void {
+		$this->addUser('alice');
+		$service = $this->serviceFor('alice');
+		$template = $service->createTemplate(['title' => 'Deploy']);
+
+		self::assertSame(
+			['configured' => false, 'valid' => false, 'path' => null, 'configuredBy' => null],
+			$service->getTemplateDestinationState($template),
 		);
 	}
 }

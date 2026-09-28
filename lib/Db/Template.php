@@ -27,6 +27,15 @@ use OCP\DB\Types;
  * @method int|null getArchivedAt()
  * @method void setArchivedAt(?int $archivedAt)
  *
+ * @method string|null getDestinationStorageId()
+ * @method void setDestinationStorageId(?string $destinationStorageId)
+ * @method int|null getDestinationFileId()
+ * @method void setDestinationFileId(?int $destinationFileId)
+ * @method string|null getDestinationPath()
+ * @method void setDestinationPath(?string $destinationPath)
+ * @method string|null getDestinationConfiguredBy()
+ * @method void setDestinationConfiguredBy(?string $destinationConfiguredBy)
+ *
  * @phpstan-type TemplateData array{
  *     id: int,
  *     uuid: string,
@@ -52,6 +61,10 @@ class Template extends Entity {
 	protected int $updatedAt = 0;
 	protected ?int $publishedAt = null;
 	protected ?int $archivedAt = null;
+	protected ?string $destinationStorageId = null;
+	protected ?int $destinationFileId = null;
+	protected ?string $destinationPath = null;
+	protected ?string $destinationConfiguredBy = null;
 
 	public function __construct() {
 		$this->addType('uuid', Types::STRING);
@@ -64,6 +77,10 @@ class Template extends Entity {
 		$this->addType('updatedAt', Types::BIGINT);
 		$this->addType('publishedAt', Types::BIGINT);
 		$this->addType('archivedAt', Types::BIGINT);
+		$this->addType('destinationStorageId', Types::TEXT);
+		$this->addType('destinationFileId', Types::BIGINT);
+		$this->addType('destinationPath', Types::TEXT);
+		$this->addType('destinationConfiguredBy', Types::STRING);
 	}
 
 	/**

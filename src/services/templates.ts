@@ -10,6 +10,7 @@ import type {
 	StepPayload,
 	Template,
 	TemplateAcl,
+	TemplateDestinationState,
 	TemplateDetail,
 	TemplateExportDocument,
 	TemplatePayload,
@@ -236,6 +237,32 @@ export async function replaceTemplateAcl(id: number, entries: AclEntryPayload[])
 	const { data } = await axios.put<TemplateAcl>(endpoint(`/templates/${id}/acl`), { entries })
 
 	return data
+}
+
+/**
+ * Save (or replace) the optional destination folder of a template (issue #48).
+ *
+ * The path is a locator from the current user's own Files; identity is captured
+ * server-side. A failed save leaves the previous destination unchanged.
+ *
+ * @param id Template identifier.
+ * @param path User-visible folder path selected in the current user's Files.
+ */
+export async function saveTemplateDestination(id: number, path: string): Promise<TemplateDestinationState> {
+	const { data } = await axios.put<{ destination: TemplateDestinationState }>(endpoint(`/templates/${id}/destination`), { path })
+
+	return data.destination
+}
+
+/**
+ * Clear the optional destination folder of a template (issue #48).
+ *
+ * @param id Template identifier.
+ */
+export async function clearTemplateDestination(id: number): Promise<TemplateDestinationState> {
+	const { data } = await axios.delete<{ destination: TemplateDestinationState }>(endpoint(`/templates/${id}/destination`))
+
+	return data.destination
 }
 
 /**

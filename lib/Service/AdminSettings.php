@@ -31,6 +31,23 @@ class AdminSettings {
 	public const KEY_SEARCH_ENABLED = 'search_enabled';
 	public const KEY_RETENTION_DAYS = 'retention_days';
 
+	// Global administration destination folder reference (#47). The reference is
+	// persisted as ONE validated JSON value under a single key so that a save or
+	// clear is a single atomic write and readers can never observe a mix of old
+	// and new fields.
+	public const KEY_DESTINATION_REFERENCE = 'destination_reference';
+
+	// Deprecated (pre-single-key) four-key representation. It is still read for
+	// compatibility with instances configured before the atomic representation
+	// existed, and is migrated to KEY_DESTINATION_REFERENCE on the next write.
+	public const KEY_DESTINATION_STORAGE_ID = 'destination_storage_id';
+	public const KEY_DESTINATION_FILE_ID = 'destination_file_id';
+	public const KEY_DESTINATION_PATH = 'destination_path';
+	public const KEY_DESTINATION_CONFIGURED_BY = 'destination_configured_by';
+
+	// Schema version embedded in the single-key reference value.
+	private const DESTINATION_REFERENCE_VERSION = 1;
+
 	// Defaults.
 	public const DEFAULT_TEMPLATE_CREATION_POLICY = TemplateCreationPolicy::Everyone->value;
 	public const DEFAULT_MAX_ATTACHMENT_SIZE = 26214400;
@@ -192,6 +209,272 @@ class AdminSettings {
 		$value = $this->config->getValueInt(Application::APP_ID, self::KEY_RETENTION_DAYS, 0);
 
 		return max(0, min(self::MAX_RETENTION_DAYS, $value));
+	}
+
+	/**
+	 * Human/UI description of the global administration destination (#47).
+	 *
+	 * Never exposes internal identity (storage id / file id); only whether the
+	 * setting is configured, whether the stored reference is complete, and the
+	 * advisory display path plus the selecting administrator.
+	 *
+	 * @return array{configured: bool, valid: bool, path: string|null, configuredBy: string|null}
+	 */
+	public function describeDestination(): array {
+		try {
+			$reference = $this->readStoredReference();
+		} catch (ValidationException) {
+			return [
+				'configured' => true,
+				'valid' => false,
+				'path' => null,
+				'configuredBy' => null,
+			];
+		}
+
+		if ($reference === null) {
+			return [
+				'configured' => false,
+				'valid' => false,
+				'path' => null,
+				'configuredBy' => null,
+			];
+		}
+
+		return [
+			'configured' => true,
+			'valid' => true,
+			'path' => $reference->path,
+			'configuredBy' => $reference->configuredBy,
+		];
+	}
+
+	/**
+	 * The stored global destination reference, or null when it is explicitly
+	 * unset.
+	 *
+	 * The reference is read from a single authoritative value, so a concurrent
+	 * update either yields the complete old value or the complete new value. A
+	 * malformed, partial or internally conflicting stored configuration fails
+	 * closed and is never returned as if it were unset.
+	 *
+	 * @throws ValidationException When the stored reference is corrupt.
+	 */
+	public function getDestinationReference(): ?DestinationReference {
+		return $this->readStoredReference();
+	}
+
+	/**
+	 * Persist the global destination reference.
+	 *
+	 * The value is written as one validated JSON value under a single key, so the
+	 * replacement is atomic: a failed write leaves the previous reference intact.
+	 * Any complete legacy four-key reference is migrated into the single key
+	 * first, so a valid configured destination can never be observed as unset
+	 * during the transition.
+	 *
+	 * @throws ValidationException When the captured identity is not complete.
+	 */
+	public function saveDestinationReference(string $storageId, int $fileId, ?string $path, string $configuredBy): DestinationReference {
+		if ($storageId === '' || $fileId <= 0 || $configuredBy === '') {
+			throw new ValidationException('destination_invalid_config');
+		}
+
+		$reference = new DestinationReference($storageId, $fileId, $path, $configuredBy);
+		$app = Application::APP_ID;
+		$this->consolidateLegacyRepresentation($app);
+		$this->writeReference($app, $reference);
+
+		return $reference;
+	}
+
+	/**
+	 * Remove the global destination reference, restoring the explicit unset
+	 * state (issue #46 default behaviour).
+	 *
+	 * The authoritative value is removed last, so a failure at any step leaves
+	 * the previous reference in place.
+	 */
+	public function clearDestinationReference(): void {
+		$app = Application::APP_ID;
+		$this->consolidateLegacyRepresentation($app);
+		$this->deleteReference($app);
+	}
+
+	/**
+	 * Resolve the effective stored reference.
+	 *
+	 * @return DestinationReference|null null when explicitly unset.
+	 *
+	 * @throws ValidationException When the stored configuration is corrupt,
+	 *                             partial or self-conflicting.
+	 */
+	private function readStoredReference(): ?DestinationReference {
+		$app = Application::APP_ID;
+		$newPresent = $this->config->hasKey($app, self::KEY_DESTINATION_REFERENCE);
+		$legacy = $this->readLegacyReference($app);
+
+		if (!$newPresent && $legacy === null) {
+			return null;
+		}
+
+		if ($newPresent) {
+			$reference = $this->parseReference($this->config->getValueString($app, self::KEY_DESTINATION_REFERENCE, ''));
+			if ($reference === null) {
+				// A present but unreadable/malformed authoritative value is never
+				// ignored in favour of a possibly stale legacy value.
+				throw new ValidationException('destination_invalid_config');
+			}
+			if ($legacy !== null && $legacy['complete']) {
+				$legacyReference = $legacy['reference'];
+				if ($legacyReference === null || !$this->sameReference($legacyReference, $reference)) {
+					// Two complete but disagreeing representations are ambiguous.
+					throw new ValidationException('destination_invalid_config');
+				}
+			}
+
+			// A partial legacy value alongside a valid authoritative value is
+			// migration/cleanup residue and is ignored.
+			return $reference;
+		}
+
+		if ($legacy !== null && $legacy['complete'] && $legacy['reference'] !== null) {
+			return $legacy['reference'];
+		}
+
+		throw new ValidationException('destination_invalid_config');
+	}
+
+	/**
+	 * Read the deprecated four-key representation.
+	 *
+	 * @return array{complete: bool, reference: DestinationReference|null}|null
+	 *                                                                          null when none of the legacy keys is present.
+	 */
+	private function readLegacyReference(string $app): ?array {
+		$present = $this->config->hasKey($app, self::KEY_DESTINATION_STORAGE_ID)
+			|| $this->config->hasKey($app, self::KEY_DESTINATION_FILE_ID)
+			|| $this->config->hasKey($app, self::KEY_DESTINATION_PATH)
+			|| $this->config->hasKey($app, self::KEY_DESTINATION_CONFIGURED_BY);
+		if (!$present) {
+			return null;
+		}
+
+		$storageId = $this->config->getValueString($app, self::KEY_DESTINATION_STORAGE_ID, '');
+		$fileId = $this->config->getValueInt($app, self::KEY_DESTINATION_FILE_ID, 0);
+		$path = $this->config->getValueString($app, self::KEY_DESTINATION_PATH, '');
+		$configuredBy = $this->config->getValueString($app, self::KEY_DESTINATION_CONFIGURED_BY, '');
+
+		if ($storageId === '' || $fileId <= 0 || $configuredBy === '') {
+			return ['complete' => false, 'reference' => null];
+		}
+
+		return [
+			'complete' => true,
+			'reference' => new DestinationReference($storageId, $fileId, $path !== '' ? $path : null, $configuredBy),
+		];
+	}
+
+	/**
+	 * Parse and validate the single-key reference value.
+	 */
+	private function parseReference(string $raw): ?DestinationReference {
+		if ($raw === '') {
+			return null;
+		}
+		try {
+			$data = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+		} catch (\JsonException) {
+			return null;
+		}
+		if (!is_array($data)) {
+			return null;
+		}
+		if (($data['v'] ?? null) !== self::DESTINATION_REFERENCE_VERSION) {
+			return null;
+		}
+
+		$storageId = $data['storageId'] ?? null;
+		$fileId = $data['fileId'] ?? null;
+		$configuredBy = $data['configuredBy'] ?? null;
+		$path = $data['path'] ?? null;
+
+		if (!is_string($storageId) || $storageId === '') {
+			return null;
+		}
+		if (!is_int($fileId) || $fileId <= 0) {
+			return null;
+		}
+		if (!is_string($configuredBy) || $configuredBy === '') {
+			return null;
+		}
+		if ($path !== null && !is_string($path)) {
+			return null;
+		}
+
+		return new DestinationReference($storageId, $fileId, ($path === '' || $path === null) ? null : $path, $configuredBy);
+	}
+
+	private function sameReference(DestinationReference $a, DestinationReference $b): bool {
+		return $a->storageId === $b->storageId
+			&& $a->fileId === $b->fileId
+			&& $a->configuredBy === $b->configuredBy
+			&& ($a->path ?? '') === ($b->path ?? '');
+	}
+
+	/**
+	 * Atomically write the authoritative single-key reference.
+	 *
+	 * @throws \RuntimeException When the configuration backend reports failure.
+	 */
+	private function writeReference(string $app, DestinationReference $reference): void {
+		$encoded = json_encode([
+			'v' => self::DESTINATION_REFERENCE_VERSION,
+			'storageId' => $reference->storageId,
+			'fileId' => $reference->fileId,
+			'path' => $reference->path ?? '',
+			'configuredBy' => $reference->configuredBy,
+		], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+		if ($this->config->setValueString($app, self::KEY_DESTINATION_REFERENCE, $encoded) === false) {
+			throw new \RuntimeException('destination_persistence_failed');
+		}
+	}
+
+	private function deleteReference(string $app): void {
+		if ($this->config->hasKey($app, self::KEY_DESTINATION_REFERENCE)) {
+			$this->config->deleteKey($app, self::KEY_DESTINATION_REFERENCE);
+		}
+	}
+
+	/**
+	 * Make the deprecated four-key representation disappear without ever leaving
+	 * the logical value unset: the current value is first preserved under the
+	 * authoritative key, then the legacy keys are removed. A failure aborts the
+	 * caller while the previous reference is still stored.
+	 */
+	private function consolidateLegacyRepresentation(string $app): void {
+		$legacy = $this->readLegacyReference($app);
+		if ($legacy === null) {
+			return;
+		}
+
+		if (!$this->config->hasKey($app, self::KEY_DESTINATION_REFERENCE)
+			&& $legacy['complete']
+			&& $legacy['reference'] !== null) {
+			$this->writeReference($app, $legacy['reference']);
+		}
+
+		foreach ([
+			self::KEY_DESTINATION_STORAGE_ID,
+			self::KEY_DESTINATION_FILE_ID,
+			self::KEY_DESTINATION_PATH,
+			self::KEY_DESTINATION_CONFIGURED_BY,
+		] as $key) {
+			if ($this->config->hasKey($app, $key)) {
+				$this->config->deleteKey($app, $key);
+			}
+		}
 	}
 
 	/**

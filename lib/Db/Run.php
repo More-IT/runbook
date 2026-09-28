@@ -45,6 +45,53 @@ use OCP\DB\Types;
  * @method int getUpdatedAt()
  * @method void setUpdatedAt(int $updatedAt)
  *
+ * @method string|null getDestinationViewUid()
+ * @method void setDestinationViewUid(?string $destinationViewUid)
+ * @method string|null getDestinationSource()
+ * @method void setDestinationSource(?string $destinationSource)
+ * @method string|null getDestinationStorageId()
+ * @method void setDestinationStorageId(?string $destinationStorageId)
+ * @method int|null getDestinationFileId()
+ * @method void setDestinationFileId(?int $destinationFileId)
+ * @method string|null getDestinationPath()
+ * @method void setDestinationPath(?string $destinationPath)
+ * @method string|null getDestinationConfiguredBy()
+ * @method void setDestinationConfiguredBy(?string $destinationConfiguredBy)
+ * @method int|null getDestinationStorageRootId()
+ * @method void setDestinationStorageRootId(?int $destinationStorageRootId)
+ * @method string|null getDestinationMountType()
+ * @method void setDestinationMountType(?string $destinationMountType)
+ * @method string|null getDestinationMountProvider()
+ * @method void setDestinationMountProvider(?string $destinationMountProvider)
+ * @method int|null getDestinationMountId()
+ * @method void setDestinationMountId(?int $destinationMountId)
+ * @method int|null getDestinationNumericStorageId()
+ * @method void setDestinationNumericStorageId(?int $destinationNumericStorageId)
+ * @method int|null getRunFolderFileId()
+ * @method void setRunFolderFileId(?int $runFolderFileId)
+ * @method string|null getRunFolderStorageId()
+ * @method void setRunFolderStorageId(?string $runFolderStorageId)
+ * @method string|null getRunFolderPath()
+ * @method void setRunFolderPath(?string $runFolderPath)
+ * @method int|null getRunFolderStorageRootId()
+ * @method void setRunFolderStorageRootId(?int $runFolderStorageRootId)
+ * @method string|null getRunFolderMountType()
+ * @method void setRunFolderMountType(?string $runFolderMountType)
+ * @method string|null getRunFolderMountProvider()
+ * @method void setRunFolderMountProvider(?string $runFolderMountProvider)
+ * @method int|null getRunFolderMountId()
+ * @method void setRunFolderMountId(?int $runFolderMountId)
+ * @method int|null getRunFolderNumericStorageId()
+ * @method void setRunFolderNumericStorageId(?int $runFolderNumericStorageId)
+ * @method int|null getDestinationMigratedAt()
+ * @method void setDestinationMigratedAt(?int $destinationMigratedAt)
+ * @method string|null getMigrationState()
+ * @method void setMigrationState(?string $migrationState)
+ * @method string|null getMigrationReason()
+ * @method void setMigrationReason(?string $migrationReason)
+ * @method int|null getMigrationAttemptedAt()
+ * @method void setMigrationAttemptedAt(?int $migrationAttemptedAt)
+ *
  * @phpstan-type RunData array{
  *     id: int,
  *     uuid: string,
@@ -82,6 +129,29 @@ class Run extends Entity {
 	protected ?string $completedBy = null;
 	protected ?string $cancelledBy = null;
 	protected int $updatedAt = 0;
+	protected ?string $destinationViewUid = null;
+	protected ?string $destinationSource = null;
+	protected ?string $destinationStorageId = null;
+	protected ?int $destinationFileId = null;
+	protected ?string $destinationPath = null;
+	protected ?string $destinationConfiguredBy = null;
+	protected ?int $destinationStorageRootId = null;
+	protected ?string $destinationMountType = null;
+	protected ?string $destinationMountProvider = null;
+	protected ?int $destinationMountId = null;
+	protected ?int $destinationNumericStorageId = null;
+	protected ?int $runFolderFileId = null;
+	protected ?string $runFolderStorageId = null;
+	protected ?string $runFolderPath = null;
+	protected ?int $runFolderStorageRootId = null;
+	protected ?string $runFolderMountType = null;
+	protected ?string $runFolderMountProvider = null;
+	protected ?int $runFolderMountId = null;
+	protected ?int $runFolderNumericStorageId = null;
+	protected ?int $destinationMigratedAt = null;
+	protected ?string $migrationState = null;
+	protected ?string $migrationReason = null;
+	protected ?int $migrationAttemptedAt = null;
 
 	public function __construct() {
 		$this->addType('uuid', Types::STRING);
@@ -100,6 +170,29 @@ class Run extends Entity {
 		$this->addType('completedBy', Types::STRING);
 		$this->addType('cancelledBy', Types::STRING);
 		$this->addType('updatedAt', Types::BIGINT);
+		$this->addType('destinationViewUid', Types::STRING);
+		$this->addType('destinationSource', Types::STRING);
+		$this->addType('destinationStorageId', Types::TEXT);
+		$this->addType('destinationFileId', Types::BIGINT);
+		$this->addType('destinationPath', Types::TEXT);
+		$this->addType('destinationConfiguredBy', Types::STRING);
+		$this->addType('destinationStorageRootId', Types::BIGINT);
+		$this->addType('destinationMountType', Types::TEXT);
+		$this->addType('destinationMountProvider', Types::TEXT);
+		$this->addType('destinationMountId', Types::INTEGER);
+		$this->addType('destinationNumericStorageId', Types::INTEGER);
+		$this->addType('runFolderFileId', Types::BIGINT);
+		$this->addType('runFolderStorageId', Types::TEXT);
+		$this->addType('runFolderPath', Types::TEXT);
+		$this->addType('runFolderStorageRootId', Types::BIGINT);
+		$this->addType('runFolderMountType', Types::TEXT);
+		$this->addType('runFolderMountProvider', Types::TEXT);
+		$this->addType('runFolderMountId', Types::INTEGER);
+		$this->addType('runFolderNumericStorageId', Types::INTEGER);
+		$this->addType('destinationMigratedAt', Types::BIGINT);
+		$this->addType('migrationState', Types::STRING);
+		$this->addType('migrationReason', Types::STRING);
+		$this->addType('migrationAttemptedAt', Types::BIGINT);
 	}
 
 	/**

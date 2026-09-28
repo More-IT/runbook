@@ -627,15 +627,31 @@ class RunServiceTest extends RunTestBase {
 
 	public function testDeleteRunRemovesEvidenceFiles(): void {
 		$this->addUser('alice');
+		// A legacy run with a pre-existing AppData attachment (compatibility path).
 		$run = $this->addRun('alice');
 		$section = $this->addRunSection($run->getId(), 0);
 		$step = $this->addRunStep($section->getId(), 'FILE', false, RunStepStatus::Pending->value, 0);
-		$this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'evidence.txt', 'content' => 'evidence']);
+		$this->seedAppDataAttachment($run, $step->getId(), 'evidence.txt', 'evidence', 'alice');
 
 		self::assertNotSame([], $this->evidenceFiles);
 
 		$this->runServiceFor('alice')->deleteRun($run->getId());
 
+		self::assertSame([], $this->evidenceFiles);
+	}
+
+	public function testDeleteRunRemovesFilesEvidence(): void {
+		$this->addUser('alice');
+		[$run, $folder] = $this->addFilesRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$step = $this->addRunStep($section->getId(), 'CHECK', false, RunStepStatus::Pending->value, 0);
+		$this->attachmentServiceFor('alice')->upload($step->getId(), ['name' => 'evidence.txt', 'content' => 'evidence']);
+
+		self::assertCount(1, $folder->getDirectoryListing());
+
+		$this->runServiceFor('alice')->deleteRun($run->getId());
+
+		self::assertCount(0, $folder->getDirectoryListing(), 'Files evidence is removed with the run');
 		self::assertSame([], $this->evidenceFiles);
 	}
 
@@ -804,5 +820,463 @@ class RunServiceTest extends RunTestBase {
 		// the API never leaks another user's run.
 		$this->expectException(NotFoundException::class);
 		$this->runServiceFor('bob')->returnSection($section->getId(), ['reason' => 'nope']);
+	}
+
+	public function testStartRunPersistsDefaultFilesDestination(): void {
+		$this->addUser('alice');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		$run = $this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Deploy']);
+
+		self::assertSame('default', $run->getDestinationSource());
+		self::assertSame('alice', $run->getDestinationViewUid());
+		self::assertSame('home::test', $run->getDestinationStorageId());
+		self::assertGreaterThan(0, $run->getDestinationFileId());
+		self::assertSame(7, $run->getDestinationStorageRootId());
+		self::assertSame('local', $run->getDestinationMountType());
+		self::assertNull($run->getDestinationMountId(), 'mount id is non-authoritative metadata');
+		self::assertSame(1, $run->getDestinationNumericStorageId());
+		self::assertGreaterThan(0, $run->getRunFolderFileId());
+		self::assertSame('home::test', $run->getRunFolderStorageId());
+		self::assertStringStartsWith('Deploy (', (string)$run->getRunFolderPath());
+	}
+
+	public function testStartRunPreservesManagedFolderWhenRunInsertFails(): void {
+		$this->addUser('alice');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+		$this->failRunInsert = true;
+
+		try {
+			$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Deploy']);
+			self::fail('an insert failure must abort the run start');
+		} catch (\OCP\DB\Exception) {
+		}
+
+		self::assertCount(0, $this->runs, 'no run row is left behind');
+		self::assertSame([], $this->deletedFolderIds, 'the folder is preserved, never recursively deleted');
+		self::assertNotContains($this->baseFolder()->getId(), $this->deletedFolderIds, 'the base folder is never removed');
+		self::assertCount(1, $this->baseFolder()->getDirectoryListing(), 'the folder is preserved as an orphan requiring manual cleanup');
+	}
+
+	public function testAFailedStartLeavesAnOrphanFolderThatANewStartDoesNotAdopt(): void {
+		// `startRun()` generates a fresh UUID each call, so a later start (even
+		// with the same title) must create a new folder and never adopt the one
+		// preserved by the failed attempt.
+		$this->addUser('alice');
+		$this->useDistinctUuids();
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+		$service = $this->runServiceFor('alice');
+
+		$this->failRunInsert = true;
+		try {
+			$service->startRun($template->getId(), ['title' => 'Deploy']);
+			self::fail('an insert failure must abort the run start');
+		} catch (\OCP\DB\Exception) {
+		}
+
+		$orphans = $this->baseFolder()->getDirectoryListing();
+		self::assertCount(1, $orphans, 'the failed attempt preserved its folder');
+		$orphanId = $orphans[0]->getId();
+
+		$this->failRunInsert = false;
+		$run = $service->startRun($template->getId(), ['title' => 'Deploy']);
+
+		self::assertNotSame($orphanId, $run->getRunFolderFileId(), 'a new start never adopts the preserved orphan');
+		self::assertCount(2, $this->baseFolder()->getDirectoryListing(), 'the orphan and the new folder both exist');
+		self::assertSame([], $this->deletedFolderIds, 'nothing is ever deleted');
+	}
+
+	public function testExistingRunsRemainLegacy(): void {
+		$this->addUser('alice');
+		$run = $this->addRun('alice');
+
+		self::assertNull($run->getDestinationSource());
+		self::assertNull($run->getDestinationViewUid());
+		self::assertNull($run->getDestinationStorageId());
+		self::assertNull($run->getDestinationFileId());
+		self::assertNull($run->getRunFolderFileId());
+	}
+
+	public function testStartRunLeavesExistingAppDataAttachmentsUntouched(): void {
+		$this->addUser('alice');
+		$legacyRun = $this->addRun('alice');
+		$legacySection = $this->addRunSection($legacyRun->getId(), 0);
+		$legacyStep = $this->addRunStep($legacySection->getId(), 'FILE', false, RunStepStatus::Pending->value, 0);
+		// A pre-existing AppData attachment (compatibility path for legacy runs).
+		$legacyAttachment = $this->seedAppDataAttachment($legacyRun, $legacyStep->getId(), 'old.txt', 'old', 'alice');
+		$attachmentCount = count($this->attachments);
+		$legacyStorageKey = $legacyAttachment->getStorageKey();
+
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+		$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'New run']);
+
+		self::assertCount($attachmentCount, $this->attachments, 'existing AppData attachments are unchanged');
+		self::assertSame($legacyStorageKey, $this->attachments[$legacyAttachment->getId()]->getStorageKey());
+	}
+
+	public function testTwoRunsWithSameTitleGetDistinctManagedFolders(): void {
+		$this->addUser('alice');
+		$this->useDistinctUuids();
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+		$service = $this->runServiceFor('alice');
+
+		$first = $service->startRun($template->getId(), ['title' => 'Deploy']);
+		$second = $service->startRun($template->getId(), ['title' => 'Deploy']);
+
+		self::assertNotSame($first->getRunFolderFileId(), $second->getRunFolderFileId());
+		self::assertNotSame($first->getRunFolderPath(), $second->getRunFolderPath());
+		self::assertCount(2, $this->baseFolder()->getDirectoryListing());
+	}
+
+	public function testFailedStartDoesNotRemoveAnotherRunsFolder(): void {
+		$this->addUser('alice');
+		$this->useDistinctUuids();
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+		$service = $this->runServiceFor('alice');
+		$existing = $service->startRun($template->getId(), ['title' => 'Deploy']);
+		$this->failRunInsert = true;
+
+		try {
+			$service->startRun($template->getId(), ['title' => 'Deploy']);
+			self::fail('an insert failure must abort the run start');
+		} catch (\OCP\DB\Exception) {
+		}
+
+		self::assertCount(1, $this->runs, 'only the pre-existing run remains');
+		self::assertSame([], $this->deletedFolderIds, 'no folder is ever removed on a failed start');
+		self::assertNotContains($existing->getRunFolderFileId(), $this->deletedFolderIds, 'the other run\'s folder is never removed');
+		self::assertTrue($this->baseFolder()->nodeExists((string)$existing->getRunFolderPath()));
+	}
+
+	/**
+	 * Give every `ISecureRandom::generate()` call a distinct value so generated
+	 * run UUIDs differ, as they do in production (the default test double
+	 * returns a constant, which would make separate runs collide on one UUID).
+	 */
+	private function useDistinctUuids(): void {
+		$counter = 0;
+		$random = $this->createMock(\OCP\Security\ISecureRandom::class);
+		$random->method('generate')->willReturnCallback(
+			static function (int $length, string $characters = '') use (&$counter): string {
+				$counter++;
+				return str_pad(dechex($counter), $length, '0', STR_PAD_LEFT);
+			},
+		);
+		$this->secureRandom = $random;
+	}
+
+	public function testStartRunWithAdminDestinationFreezesSourceAndConfiguredBy(): void {
+		$this->addUser('alice');
+		$configured = $this->addUserFolder('Shared', 7001);
+		$this->setAdminDestination('home::test', 7001, '/Shared', 'admin');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		$run = $this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Deploy']);
+
+		self::assertSame('admin', $run->getDestinationSource());
+		self::assertSame('admin', $run->getDestinationConfiguredBy());
+		self::assertSame(7001, $run->getDestinationFileId());
+		self::assertSame('home::test', $run->getDestinationStorageId());
+		self::assertCount(1, $configured->getDirectoryListing(), 'the managed folder is created in the configured folder');
+		self::assertArrayNotHasKey('Runbook', $this->userRootChildren, 'the default folder is not used');
+	}
+
+	public function testStartRunFailsClosedWhenAdminDestinationIsMissingForOwner(): void {
+		$this->addUser('alice');
+		$this->setAdminDestination('home::test', 9999, '/Shared', 'admin');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		try {
+			$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Deploy']);
+			self::fail('a missing configured destination must abort the run start');
+		} catch (ConflictException $exception) {
+			self::assertSame('destination_no_access', $exception->getReason());
+		}
+
+		self::assertCount(0, $this->runs, 'no run row is created when the destination cannot be resolved');
+		self::assertSame([], $this->deletedFolderIds);
+	}
+
+	public function testStartRunFailsClosedWhenAdminDestinationStoredStateIsCorrupt(): void {
+		$this->addUser('alice');
+		$this->setAppConfig(AdminSettings::KEY_DESTINATION_REFERENCE, '{not valid json');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		try {
+			$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Deploy']);
+			self::fail('a corrupt stored destination must abort the run start');
+		} catch (ValidationException $exception) {
+			self::assertSame('destination_invalid_config', $exception->getReason());
+		}
+
+		self::assertCount(0, $this->runs, 'no run row is created and there is no fallback to Files/Runbook');
+		self::assertArrayNotHasKey('Runbook', $this->userRootChildren);
+	}
+
+	public function testStartRunWithTemplateDestinationFreezesSourceAndConfiguredBy(): void {
+		$this->addUser('alice');
+		$this->addUserFolder('AdminShared', 7001);
+		$templateFolder = $this->addUserFolder('TemplateShared', 7002);
+		$this->setAdminDestination('home::test', 7001, '/AdminShared', 'admin');
+		$template = $this->addTemplate('alice');
+		$this->setTemplateDestination($template, 'home::test', 7002, '/TemplateShared', 'editor');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		$run = $this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Deploy']);
+
+		self::assertSame('template', $run->getDestinationSource());
+		self::assertSame('editor', $run->getDestinationConfiguredBy());
+		self::assertSame(7002, $run->getDestinationFileId());
+		self::assertSame('home::test', $run->getDestinationStorageId());
+		self::assertCount(1, $templateFolder->getDirectoryListing(), 'the managed folder is created in the template folder');
+		self::assertArrayNotHasKey('Runbook', $this->userRootChildren);
+	}
+
+	public function testUnsetTemplateDestinationFallsThroughToAdminDestination(): void {
+		$this->addUser('alice');
+		$adminFolder = $this->addUserFolder('AdminShared', 7001);
+		$this->setAdminDestination('home::test', 7001, '/AdminShared', 'admin');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		$run = $this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Deploy']);
+
+		self::assertSame('admin', $run->getDestinationSource());
+		self::assertSame('admin', $run->getDestinationConfiguredBy());
+		self::assertSame(7001, $run->getDestinationFileId());
+		self::assertCount(1, $adminFolder->getDirectoryListing());
+	}
+
+	public function testConfiguredTemplateDestinationMissingForOwnerFailsClosedWithoutFallthrough(): void {
+		$this->addUser('alice');
+		$this->addUserFolder('AdminShared', 7001);
+		$this->setAdminDestination('home::test', 7001, '/AdminShared', 'admin');
+		$template = $this->addTemplate('alice');
+		$this->setTemplateDestination($template, 'home::test', 9999, '/Missing', 'editor');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		try {
+			$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Deploy']);
+			self::fail('a missing template destination must abort the run start');
+		} catch (ConflictException $exception) {
+			self::assertSame('destination_no_access', $exception->getReason());
+		}
+
+		self::assertCount(0, $this->runs);
+		self::assertArrayNotHasKey('Runbook', $this->userRootChildren, 'no fallback to the admin or default destination');
+	}
+
+	public function testPartialTemplateDestinationFailsClosed(): void {
+		$this->addUser('alice');
+		$template = $this->addTemplate('alice');
+		// Only the file id is set: a partial, corrupt reference.
+		$template->setDestinationFileId(7002);
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		try {
+			$this->runServiceFor('alice')->startRun($template->getId(), ['title' => 'Deploy']);
+			self::fail('a partial template destination must abort the run start');
+		} catch (ValidationException $exception) {
+			self::assertSame('destination_invalid_config', $exception->getReason());
+		}
+
+		self::assertCount(0, $this->runs);
+		self::assertArrayNotHasKey('Runbook', $this->userRootChildren);
+	}
+
+	public function testStartRunRuntimeDestinationOverridesTemplateAndAdmin(): void {
+		$this->addUser('alice');
+		$this->addUserFolder('AdminShared', 7001);
+		$templateFolder = $this->addUserFolder('TemplateShared', 7002);
+		$runtimeFolder = $this->addUserFolder('RuntimeShared', 7003);
+		$this->setAdminDestination('home::test', 7001, '/AdminShared', 'admin');
+		$template = $this->addTemplate('alice');
+		$this->setTemplateDestination($template, 'home::test', 7002, '/TemplateShared', 'editor');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		$run = $this->runServiceFor('alice')->startRun($template->getId(), [
+			'title' => 'Deploy',
+			'destinationPath' => '/RuntimeShared',
+		]);
+
+		self::assertSame('runtime', $run->getDestinationSource());
+		self::assertSame('alice', $run->getDestinationConfiguredBy());
+		self::assertSame(7003, $run->getDestinationFileId());
+		self::assertSame('home::test', $run->getDestinationStorageId());
+		self::assertCount(1, $runtimeFolder->getDirectoryListing());
+		self::assertCount(0, $templateFolder->getDirectoryListing());
+		self::assertArrayNotHasKey('Runbook', $this->userRootChildren);
+
+		// The run-time choice is not written back to the template or admin setting.
+		self::assertSame(7002, $template->getDestinationFileId());
+		self::assertSame(7001, $this->adminSettings->getDestinationReference()?->fileId);
+	}
+
+	public function testStartRunRuntimeIgnoresClientSuppliedIdentity(): void {
+		$this->addUser('alice');
+		$this->addUserFolder('RuntimeShared', 7003);
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		$run = $this->runServiceFor('alice')->startRun($template->getId(), [
+			'title' => 'Deploy',
+			'destinationPath' => '/RuntimeShared',
+			'destinationStorageId' => 'evil::storage',
+			'destinationFileId' => 999999,
+		]);
+
+		self::assertSame('runtime', $run->getDestinationSource());
+		self::assertSame(7003, $run->getDestinationFileId(), 'only the server-captured identity is used');
+		self::assertSame('home::test', $run->getDestinationStorageId());
+	}
+
+	public function testStartRunRuntimeMissingPathFailsClosedWithoutFallthrough(): void {
+		$this->addUser('alice');
+		$adminFolder = $this->addUserFolder('AdminShared', 7001);
+		$templateFolder = $this->addUserFolder('TemplateShared', 7002);
+		$this->setAdminDestination('home::test', 7001, '/AdminShared', 'admin');
+		$template = $this->addTemplate('alice');
+		$this->setTemplateDestination($template, 'home::test', 7002, '/TemplateShared', 'editor');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		try {
+			$this->runServiceFor('alice')->startRun($template->getId(), [
+				'title' => 'Deploy',
+				'destinationPath' => '/Missing',
+			]);
+			self::fail('a missing run-time destination must abort the run start');
+		} catch (ValidationException $exception) {
+			self::assertSame('destination_invalid', $exception->getReason());
+		}
+
+		self::assertCount(0, $this->runs);
+		self::assertCount(0, $adminFolder->getDirectoryListing());
+		self::assertCount(0, $templateFolder->getDirectoryListing());
+		self::assertArrayNotHasKey('Runbook', $this->userRootChildren, 'no fallback to template, admin or default');
+	}
+
+	public function testStartRunRuntimeUnwritableFailsClosed(): void {
+		$this->addUser('alice');
+		$this->addUserFolder('ReadOnly', 7003, false);
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		try {
+			$this->runServiceFor('alice')->startRun($template->getId(), [
+				'title' => 'Deploy',
+				'destinationPath' => '/ReadOnly',
+			]);
+			self::fail('an unwritable run-time destination must abort the run start');
+		} catch (ConflictException $exception) {
+			self::assertSame('destination_not_writable', $exception->getReason());
+		}
+		self::assertCount(0, $this->runs);
+	}
+
+	public function testStartRunRuntimeFileSelectionFailsClosed(): void {
+		$this->addUser('alice');
+		$children = [];
+		$this->userRootChildren['note.txt'] = $this->makeFileMock('note.txt', 7003, $children);
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		try {
+			$this->runServiceFor('alice')->startRun($template->getId(), [
+				'title' => 'Deploy',
+				'destinationPath' => '/note.txt',
+			]);
+			self::fail('a file selection must abort the run start');
+		} catch (ValidationException $exception) {
+			self::assertSame('destination_invalid', $exception->getReason());
+		}
+		self::assertCount(0, $this->runs);
+	}
+
+	public function testStartRunRuntimeMalformedInputFailsClosed(): void {
+		$this->addUser('alice');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+
+		try {
+			$this->runServiceFor('alice')->startRun($template->getId(), [
+				'title' => 'Deploy',
+				'destinationPath' => 123,
+			]);
+			self::fail('a malformed run-time destination must abort the run start');
+		} catch (ValidationException $exception) {
+			self::assertSame('invalid_field', $exception->getReason());
+		}
+		self::assertCount(0, $this->runs);
+	}
+
+	public function testStartRunRuntimeInsertFailurePreservesManagedFolder(): void {
+		$this->addUser('alice');
+		$this->addUserFolder('RuntimeShared', 7003);
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+		$this->failRunInsert = true;
+
+		try {
+			$this->runServiceFor('alice')->startRun($template->getId(), [
+				'title' => 'Deploy',
+				'destinationPath' => '/RuntimeShared',
+			]);
+			self::fail('an insert failure must abort the run start');
+		} catch (\OCP\DB\Exception) {
+		}
+
+		self::assertCount(0, $this->runs);
+		self::assertSame([], $this->deletedFolderIds, 'the managed folder is preserved, never recursively deleted');
+		self::assertNotContains(7003, $this->deletedFolderIds, 'the selected destination folder itself is never removed');
+	}
+
+	public function testRuntimeChoiceDoesNotAffectAnotherRun(): void {
+		$this->addUser('alice');
+		$this->useDistinctUuids();
+		$adminFolder = $this->addUserFolder('AdminShared', 7001);
+		$this->addUserFolder('RuntimeShared', 7003);
+		$this->setAdminDestination('home::test', 7001, '/AdminShared', 'admin');
+		$template = $this->addTemplate('alice');
+		$section = $this->addTemplateSection($template->getId(), 'Prep', 0);
+		$this->addTemplateStep($section->getId(), 'Check', 'CHECK', true, 0);
+		$service = $this->runServiceFor('alice');
+
+		$first = $service->startRun($template->getId(), ['title' => 'With runtime', 'destinationPath' => '/RuntimeShared']);
+		$second = $service->startRun($template->getId(), ['title' => 'Inherited']);
+
+		self::assertSame('runtime', $first->getDestinationSource());
+		self::assertSame(7003, $first->getDestinationFileId());
+		self::assertSame('admin', $second->getDestinationSource(), 'a later run without a run-time choice inherits again');
+		self::assertSame(7001, $second->getDestinationFileId());
+		self::assertCount(1, $adminFolder->getDirectoryListing());
 	}
 }

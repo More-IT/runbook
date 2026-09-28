@@ -34,6 +34,7 @@ class RunStepService {
 		private readonly RunSectionMapper $runSections,
 		private readonly RunStepMapper $runSteps,
 		private readonly AttachmentMapper $attachments,
+		private readonly AttachmentReconciliationService $reconciliation,
 		private readonly EvidenceLockService $evidenceLock,
 		private readonly RunAccessService $access,
 		private readonly PrincipalValidator $principalValidator,
@@ -141,10 +142,19 @@ class RunStepService {
 			$step->setResponseValue(null);
 
 			// The evidence check and the status update must be atomic with
-			// evidence deletion, so they share the per-step evidence lock.
+			// evidence deletion, so they share the per-step evidence lock. Only
+			// evidence that is currently present and in managed scope counts
+			// (#52); missing/out-of-scope/unavailable files never satisfy a new
+			// completion.
 			$this->evidenceLock->synchronized($run->getId(), $step->getId(), function () use ($run, $step, $completeStep): void {
-				if ($step->getRequired() && $this->countStepEvidence($run, $step) === 0) {
-					throw new ValidationException('file_evidence_required');
+				if ($step->getRequired()) {
+					$attachments = $this->attachments->findByStep($step->getId());
+					if ($attachments === []) {
+						throw new ValidationException('file_evidence_required');
+					}
+					if ($this->reconciliation->presentCount($run, $attachments) === 0) {
+						throw new ValidationException('file_evidence_missing');
+					}
 				}
 				$completeStep();
 			});
@@ -322,13 +332,6 @@ class RunStepService {
 		} catch (DoesNotExistException) {
 			throw new NotFoundException('run_step_not_found');
 		}
-	}
-
-	/**
-	 * Number of persisted attachments belonging to this exact step and run.
-	 */
-	private function countStepEvidence(Run $run, RunStep $step): int {
-		return $this->attachments->countByRunAndStep($run->getId(), $step->getId());
 	}
 
 	/**

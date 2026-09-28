@@ -20,7 +20,7 @@ class RunStepServiceTest extends RunTestBase {
 	 * @param array<string, mixed> $config
 	 */
 	private function createStep(string $type, bool $required, array $config = [], string $runStatus = RunStatus::Active->value): RunStep {
-		$run = $this->addRun('alice', $runStatus);
+		[$run] = $this->addFilesRun('alice', $runStatus);
 		$section = $this->addRunSection($run->getId(), 0);
 
 		return $this->addRunStep($section->getId(), $type, $required, RunStepStatus::Pending->value, 0, $config);
@@ -143,7 +143,7 @@ class RunStepServiceTest extends RunTestBase {
 
 	public function testRequiredFileStepIgnoresEvidenceFromAnotherStep(): void {
 		$this->addUser('alice');
-		$run = $this->addRun('alice');
+		[$run] = $this->addFilesRun('alice');
 		$section = $this->addRunSection($run->getId(), 0);
 		$target = $this->addRunStep($section->getId(), 'FILE', true, RunStepStatus::Pending->value, 0);
 		$other = $this->addRunStep($section->getId(), 'FILE', true, RunStepStatus::Pending->value, 1);
@@ -206,7 +206,7 @@ class RunStepServiceTest extends RunTestBase {
 		$this->addUser('alice');
 		$this->addUser('bob');
 		$this->addUser('carol');
-		$run = $this->addRun('alice');
+		[$run] = $this->addFilesRun('alice');
 		$section = $this->addRunSection($run->getId(), 0);
 		$step = $this->addRunStep($section->getId(), 'FILE', true, RunStepStatus::Pending->value, 0);
 		$this->seedRunAcl($run->getId(), PrincipalType::User->value, 'carol', RunAclRole::Viewer->value);

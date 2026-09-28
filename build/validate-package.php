@@ -21,7 +21,7 @@ require_once __DIR__ . '/package-links.php';
 $options = parseOptions($argv);
 $isPackage = isset($options['package']);
 $root = $isPackage ? rtrim($options['package'], "/\\") : dirname(__DIR__);
-$expectedVersion = $options['version'] ?? '0.4.0';
+$expectedVersion = $options['version'] ?? null;
 
 $errors = [];
 $notes = [];
@@ -98,6 +98,7 @@ $requiredFiles = [
 	// verifies these resolve inside the staged tree.
 	'docs/ux-architecture.md',
 	'docs/manual-acceptance-checklist.md',
+	'docs/folder-model.md',
 ];
 
 foreach ($requiredFiles as $file) {
@@ -133,7 +134,7 @@ if (is_file($infoXmlPath)) {
 		if ($namespace !== 'Runbook') {
 			$errors[] = 'info.xml namespace must be "Runbook"';
 		}
-		if ($infoVersion !== $expectedVersion) {
+		if ($expectedVersion !== null && $infoVersion !== $expectedVersion) {
 			$errors[] = sprintf('Version mismatch: info.xml=%s, expected=%s', $infoVersion, $expectedVersion);
 		}
 		if (!$isPackage && is_file($root . '/package.json')) {
