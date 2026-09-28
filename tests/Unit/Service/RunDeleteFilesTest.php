@@ -14,7 +14,12 @@ use OCA\Runbook\Enum\RunStepStatus;
 use OCA\Runbook\Service\ConflictException;
 use OCA\Runbook\Service\NotFoundException;
 use OCA\Runbook\Service\TransactionRunner;
+use OCP\Files\File;
 use OCP\Files\Folder;
+use OCP\Files\Mount\IMountPoint;
+use OCP\Files\NotFoundException as FilesNotFoundException;
+use OCP\Files\Storage\IStorage;
+use PHPUnit\Framework\MockObject\MockObject;
 
 /**
  * Fail-closed run deletion and durable managed-folder cleanup (issue #54).
@@ -122,6 +127,71 @@ class RunDeleteFilesTest extends RunTestBase {
 		self::assertArrayHasKey($run->getId(), $this->runs, 'the run is retained');
 		self::assertArrayHasKey($attachment->getId(), $this->attachments, 'the attachment identity is retained');
 		self::assertArrayHasKey('locked.txt', $this->folderChildrenById[$folder->getId()], 'the file is retained');
+		self::assertNotContains($file->getId(), $this->deletedFileIds);
+		self::assertSame([], $this->filesCleanups, 'no cleanup record on a pre-flight failure');
+	}
+
+	/**
+	 * A present Files node whose deletability probe throws, as when the file or
+	 * its storage became unreachable between reconciliation and the pre-flight.
+	 * The node still resolves by identity and descriptor, but `isDeletable()`
+	 * and `getPermissions()` fail.
+	 *
+	 * @return File&MockObject
+	 */
+	private function makeUnprobeableFile(string $name, int $id, int $folderId, string $content = 'payload'): File {
+		/** @var IStorage&MockObject $storage */
+		$storage = $this->createMock(IStorage::class);
+		$storage->method('getId')->willReturn('home::test');
+		/** @var IMountPoint&MockObject $mount */
+		$mount = $this->createMock(IMountPoint::class);
+		$mount->method('getStorageRootId')->willReturn(7);
+		$mount->method('getMountType')->willReturn('local');
+		$mount->method('getMountProvider')->willReturn('OC\\Files\\Mount\\LocalHomeMountProvider');
+		$mount->method('getMountId')->willReturn(null);
+		$mount->method('getNumericStorageId')->willReturn(1);
+
+		/** @var File&MockObject $file */
+		$file = $this->createMock(File::class);
+		$file->method('getId')->willReturn($id);
+		$file->method('getPath')->willReturn($name);
+		$file->method('getName')->willReturn($name);
+		$file->method('getStorage')->willReturn($storage);
+		$file->method('getMountPoint')->willReturn($mount);
+		$file->method('isDeletable')->willThrowException(new FilesNotFoundException($name));
+		$file->method('getPermissions')->willThrowException(new FilesNotFoundException($name));
+		$file->method('getSize')->willReturn(strlen($content));
+		$file->method('getContent')->willReturn($content);
+		$file->method('delete')->willReturnCallback(function () use ($name, $id, $folderId): void {
+			$this->deletedFileIds[] = $id;
+			unset($this->folderChildrenById[$folderId][$name]);
+		});
+
+		return $file;
+	}
+
+	public function testUnprobeableTrackedFileBlocksTheWholeDeletion(): void {
+		// A Files node whose delete capability cannot be read (unreachable
+		// storage, race deletion, unexpected Files error) must fail closed with
+		// the stable `run_delete_blocked` reason and never be assumed deletable.
+		$this->addUser('alice');
+		[$run, $folder] = $this->addFilesRun('alice');
+		$section = $this->addRunSection($run->getId(), 0);
+		$step = $this->addRunStep($section->getId(), 'CHECK', false, RunStepStatus::Pending->value, 0, [], PrincipalType::User->value, 'alice');
+		$file = $this->makeUnprobeableFile('probe.txt', 7002, $folder->getId());
+		$this->folderChildrenById[$folder->getId()]['probe.txt'] = $file;
+		$attachment = $this->seedFilesAttachment($run, $step->getId(), $file, 'probe.txt', 'payload', 'alice');
+
+		try {
+			$this->runServiceFor('alice')->deleteRun($run->getId());
+			self::fail('a file whose delete capability cannot be probed must block the deletion');
+		} catch (ConflictException $exception) {
+			self::assertSame('run_delete_blocked', $exception->getReason());
+		}
+
+		self::assertArrayHasKey($run->getId(), $this->runs, 'the run is retained');
+		self::assertArrayHasKey($attachment->getId(), $this->attachments, 'the attachment identity is retained');
+		self::assertArrayHasKey('probe.txt', $this->folderChildrenById[$folder->getId()], 'the file is retained');
 		self::assertNotContains($file->getId(), $this->deletedFileIds);
 		self::assertSame([], $this->filesCleanups, 'no cleanup record on a pre-flight failure');
 	}

@@ -105,4 +105,20 @@ class FilesCleanup extends Entity {
 		$this->addType('lastAttemptAt', Types::BIGINT);
 		$this->addType('createdAt', Types::BIGINT);
 	}
+
+	/**
+	 * Explicit setter so the NOT NULL `kind` column is always persisted.
+	 *
+	 * The property default already equals `KIND_FOLDER`, and the magic
+	 * `Entity::setter()` treats a setter call whose value equals the current
+	 * value as a no-op, which would omit `kind` from the INSERT. The column is
+	 * NOT NULL with no database default, so PostgreSQL rejects the cleanup row
+	 * (SQLSTATE 23502) and the whole run deletion fails. See
+	 * {@see Run::setTemplateVersion()} and {@see Attachment::setStorageKey()}
+	 * for the same guard.
+	 */
+	public function setKind(string $kind): void {
+		$this->kind = $kind;
+		$this->markFieldUpdated('kind');
+	}
 }

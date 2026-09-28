@@ -174,10 +174,16 @@ class FilesAttachmentStorage {
 	 *
 	 * Every present, in-scope file is pre-flighted **on its own node** (never by
 	 * inferring a child's deletability from its parent). If any file denies
-	 * delete permission or cannot be resolved, **nothing is deleted** and the
-	 * failing attachments are returned, so the caller aborts the whole run
-	 * deletion with all identities intact for retry. Already-missing files are
+	 * delete permission, cannot be resolved, or its delete capability cannot be
+	 * probed (unreachable storage, race deletion, unexpected Files/DB error),
+	 * **nothing is deleted** and the failing attachments are returned, so the
+	 * caller aborts the whole run deletion with the stable `run_delete_blocked`
+	 * reason and all identities intact for retry. Already-missing files are
 	 * treated as gone; out-of-scope files are never deleted and never block.
+	 *
+	 * The pre-flight never lets a Files/storage throwable escape: an unmapped
+	 * exception would be served as a generic HTTP 500 and hide the actionable
+	 * reason from the user (issue #54).
 	 *
 	 * If a deletion fails mid-way, the files already deleted stay deleted (their
 	 * rows are retained until the run-row deletion) and the remaining failures
@@ -192,20 +198,33 @@ class FilesAttachmentStorage {
 		$blocked = [];
 
 		foreach ($attachments as $attachment) {
-			$result = $this->reconciliation->reconcile($run, $attachment);
-			if ($result['state'] === AttachmentReconciliationService::PRESENT && $result['file'] !== null) {
-				$file = $result['file'];
-				if (!$file->isDeletable() || ($file->getPermissions() & Constants::PERMISSION_DELETE) === 0) {
-					$blocked[] = ['attachmentId' => (int)$attachment->getId(), 'reason' => 'not_deletable'];
+			try {
+				$result = $this->reconciliation->reconcile($run, $attachment);
+				if ($result['state'] === AttachmentReconciliationService::PRESENT && $result['file'] !== null) {
+					$file = $result['file'];
+					if (!$file->isDeletable() || ($file->getPermissions() & Constants::PERMISSION_DELETE) === 0) {
+						$blocked[] = ['attachmentId' => (int)$attachment->getId(), 'reason' => 'not_deletable'];
+						continue;
+					}
+					$toDelete[] = [$attachment, $file];
 					continue;
 				}
-				$toDelete[] = [$attachment, $file];
-				continue;
-			}
-			if ($result['state'] === AttachmentReconciliationService::UNAVAILABLE) {
+				if ($result['state'] === AttachmentReconciliationService::UNAVAILABLE) {
+					$blocked[] = ['attachmentId' => (int)$attachment->getId(), 'reason' => 'unavailable'];
+				}
+				// MISSING and OUT_OF_SCOPE: nothing to delete.
+			} catch (\Throwable $exception) {
+				// Fail closed: a file whose delete capability cannot be probed
+				// must never be assumed deletable. Report it as unavailable so the
+				// caller aborts with the stable `run_delete_blocked` reason rather
+				// than leaking an unmapped Files error as a generic HTTP 500.
+				$this->logger->warning('Runbook could not pre-flight tracked Files evidence', [
+					'app' => 'runbook',
+					'attachmentId' => (int)$attachment->getId(),
+					'exception' => $exception,
+				]);
 				$blocked[] = ['attachmentId' => (int)$attachment->getId(), 'reason' => 'unavailable'];
 			}
-			// MISSING and OUT_OF_SCOPE: nothing to delete.
 		}
 
 		if ($blocked !== []) {

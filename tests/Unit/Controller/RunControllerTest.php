@@ -10,6 +10,7 @@ use OCA\Runbook\Db\RunSection;
 use OCA\Runbook\Db\RunStep;
 use OCA\Runbook\Enum\RunStatus;
 use OCA\Runbook\Enum\RunStepStatus;
+use OCA\Runbook\Service\ConflictException;
 use OCA\Runbook\Service\RunService;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
@@ -194,5 +195,27 @@ class RunControllerTest extends TestCase {
 
 		self::assertInstanceOf(JSONResponse::class, $response);
 		self::assertSame(RunStatus::Active->value, $response->getData()['run']['status']);
+	}
+
+	public function testDestroyDeletesTheRun(): void {
+		$this->runService->expects(self::once())->method('deleteRun')->with(1);
+
+		$response = $this->controller(['id' => '1'])->destroy();
+
+		self::assertSame(200, $response->getStatus());
+		self::assertTrue($response->getData()['success']);
+	}
+
+	public function testDestroyLetsABlockedDeletionReachTheErrorMiddleware(): void {
+		// The controller must not swallow the fail-closed reason: the error
+		// middleware maps `run_delete_blocked` to a 409 JSON body so the client
+		// can show the specific message instead of a generic failure.
+		$this->runService->expects(self::once())->method('deleteRun')->with(1)
+			->willThrowException(new ConflictException('run_delete_blocked'));
+
+		$this->expectException(ConflictException::class);
+		$this->expectExceptionMessage('run_delete_blocked');
+
+		$this->controller(['id' => '1'])->destroy();
 	}
 }

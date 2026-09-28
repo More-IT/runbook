@@ -955,8 +955,12 @@ rows are the tracking metadata that makes a retry possible, so they are retained
 >   owner's view **on its own node**. A present, in-scope file that denies
 >   `isDeletable()`/`PERMISSION_DELETE`, or is `unavailable`, aborts the whole
 >   deletion (`run_delete_blocked`) before any database row is touched; the run,
->   its attachment rows and all identities stay intact for retry. `missing` files
->   are treated as gone; `out_of_scope` files are never deleted and never block.
+>   its attachment rows and all identities stay intact for retry. A file whose
+>   delete capability cannot be probed (unreachable storage, race deletion,
+>   unexpected Files/DB error) is treated as `unavailable` for the same abort,
+>   so an unexpected Files error is never served as a generic 500. `missing`
+>   files are treated as gone; `out_of_scope` files are never deleted and never
+>   block.
 > - Present, in-scope files are then deleted by their own node; a mid-way failure
 >   aborts before the database transaction (already-deleted files are reported
 >   `missing` on retry and skipped).

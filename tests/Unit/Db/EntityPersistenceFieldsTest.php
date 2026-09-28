@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace OCA\Runbook\Tests\Unit\Db;
 
 use OCA\Runbook\Db\ActivityEvent;
+use OCA\Runbook\Db\FilesCleanup;
 use OCA\Runbook\Db\Run;
 use OCA\Runbook\Db\RunSection;
 use OCA\Runbook\Db\RunStep;
@@ -80,5 +81,16 @@ class EntityPersistenceFieldsTest extends TestCase {
 
 		self::assertArrayHasKey('metadata', $event->getUpdatedFields());
 		self::assertSame('[]', $event->getMetadata());
+	}
+
+	public function testFilesCleanupKindIsAlwaysUpdated(): void {
+		// `kind` defaults to KIND_FOLDER and its column is NOT NULL without a
+		// database default, so the setter must still mark it updated.
+		$cleanup = new FilesCleanup();
+
+		$cleanup->setKind(FilesCleanup::KIND_FOLDER);
+
+		self::assertArrayHasKey('kind', $cleanup->getUpdatedFields());
+		self::assertSame(FilesCleanup::KIND_FOLDER, $cleanup->getKind());
 	}
 }
