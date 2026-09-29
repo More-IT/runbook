@@ -581,7 +581,7 @@ function openImportedTemplate(): void {
 	font-size: 1.1em;
 	font-weight: bold;
 	cursor: pointer;
-	text-align: left;
+	text-align: start;
 }
 
 .runbook-list__meta {

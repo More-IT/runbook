@@ -1,6 +1,6 @@
 {
   "name": "runbook",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "description": "Create, execute and track repeatable procedures as structured, collaborative runbooks.",
   "license": "AGPL-3.0-or-later",
   "private": true,
@@ -12,6 +12,7 @@
     "build": "vite build",
     "dev": "vite build --watch --mode development",
     "lint": "eslint src",
+    "lint:style": "stylelint \"src/**/*.vue\" \"src/**/*.scss\" \"src/**/*.css\"",
     "lint:fix": "eslint src --fix",
     "typecheck": "vue-tsc --noEmit",
     "test:frontend": "node --test tests/frontend/"
@@ -27,10 +28,12 @@
   "devDependencies": {
     "@nextcloud/browserslist-config": "^3.0.1",
     "@nextcloud/eslint-config": "^9.0.1",
+    "@nextcloud/stylelint-config": "3.1.1",
     "@nextcloud/vite-config": "^2.5.4",
     "@vitejs/plugin-vue": "^6.0.9",
     "eslint": "^10.11.0",
     "sass": "^1.104.1",
+    "stylelint": "^16.13.2",
     "typescript": "^5.9.3",
     "vite": "^7.3.6",
     "vue-tsc": "^3.3.11"

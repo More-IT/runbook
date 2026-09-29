@@ -280,7 +280,7 @@ function formatDate(timestamp: number): string {
 }
 
 .runbook-activity__meta {
-	margin-left: auto;
+	margin-inline-start: auto;
 	color: var(--color-text-maxcontrast, #555);
 	font-size: 0.85em;
 }

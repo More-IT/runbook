@@ -30,6 +30,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Style lint
+        run: npm run lint:style
+
       - name: Type check
         run: npm run typecheck
 

@@ -14,13 +14,12 @@ template import/export** work (issues #26–#33), and the **0.5.0 Nextcloud File
 integration** (issues #45–#56).
 
 > The numbered **"Milestone N"** labels used below are feature milestones and are
-> **not** the release version. The application version is **0.5.0**
-> (`appinfo/info.xml`) as a **release candidate prepared for manual acceptance**:
-> it is **not** a published, production-verified release and has not been deployed
-> to or accepted on any real Nextcloud instance. The 0.4.0 UX/import–export work
-> and the 0.5.0 Nextcloud Files integration (destination precedence, Files-backed
-> evidence, reconciliation, fail-closed deletion/cleanup and legacy AppData
-> migration) are code-complete and await the real-Nextcloud acceptance run in
+> **not** the release version. The application version is **1.0.0**
+> (`appinfo/info.xml`, `package.json`) as a public source release prepared for
+> collaboration and future App Store submission. It is not yet a claim of
+> Nextcloud App Store approval or real-instance acceptance. The release gates and
+> known limitations are recorded in
+> [`docs/official-1.0.0-readiness.md`](docs/official-1.0.0-readiness.md) and
 > [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md).
 
 ## Feature set
@@ -156,9 +155,9 @@ Milestone 0.4.0 — UX redesign and template import/export (issues #26–#33):
   and import (`POST .../templates/import`), with authoring-rule validation,
   transaction atomicity, a canonical 2 MB server limit and a 32 MB browser
   source-file guard (see "Template export" and "Template import" below).
-- This milestone was prepared as the 0.4.0 release candidate for manual
-  acceptance; it is not a published or production-verified release and is now
-  superseded by the 0.5.0 release candidate. The acceptance checklist is
+ - This milestone was prepared as the 0.4.0 release candidate for manual
+   acceptance; it is not a published or production-verified release and is now
+   superseded by the 1.0.0 public source release. The acceptance checklist is
   [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md).
 
 > The interactive process-flow engine (issues #15–#21) is **implemented**:
@@ -167,8 +166,8 @@ Milestone 0.4.0 — UX redesign and template import/export (issues #26–#33):
 > below.
 
 > Template **export and import are implemented and hardened** (see "Template
-> export" and "Template import" below). The current **0.5.0 release candidate** is
-> prepared for manual acceptance; the real-Nextcloud/browser acceptance checklist
+> export" and "Template import" below). The current **1.0.0 public source release**
+> is prepared for future App Store acceptance; the real-Nextcloud/browser checklist
 > is in
 > [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md).
 > Automated checks and package validation are not a substitute for that manual
@@ -1788,20 +1787,19 @@ typed number comparison):
 
 ## Release
 
-- **Version:** 0.5.0 release candidate (`appinfo/info.xml`, `package.json`).
+- **Version:** 1.0.0 public source release (`appinfo/info.xml`, `package.json`).
 - **Nextcloud:** 33.
 - **PHP:** 8.2 – 8.5.
 - **Databases:** MySQL/MariaDB, PostgreSQL and SQLite.
 - **License:** AGPL-3.0-or-later.
 
-The 0.5.0 Nextcloud Files integration (#45–#56) is prepared as a **release
-candidate for manual acceptance**: this candidate covers Files destinations and
-Files-backed evidence, out-of-band reconciliation, fail-closed run deletion with
-durable cleanup records, and the legacy AppData migration. It is **not** a
-published, production-verified release: real-Nextcloud acceptance is still
-outstanding, and the package must not be treated as production-ready until the
-checklist has been executed. The 0.4.0 UX/import–export work (#26–#33) was
-prepared as the previous candidate and was never deployed. The v0.3.0 material
+The 1.0.0 source release includes the 0.5.0 Nextcloud Files integration (#45–#56):
+Files destinations and Files-backed evidence, out-of-band reconciliation,
+fail-closed run deletion with durable cleanup records, and legacy AppData
+migration. It is **not** App Store approved or real-instance verified: the
+acceptance gates remain outstanding and the package must not be treated as
+production-ready until they have been executed. The 0.4.0 UX/import–export work
+(#26–#33) was prepared as the previous candidate and was never deployed. The v0.3.0 material
 below is retained as historical release information.
 
 ### v0.3.0
@@ -1888,8 +1886,8 @@ php build/create-package.php
 
 `build/create-package.php` reads the version from `appinfo/info.xml`, writes a
 staging tree with runtime files only and creates `runbook-<version>.tar.gz`
-(archive root `runbook/`) — for example `runbook-0.5.0.tar.gz` for the current
-0.5.0 release candidate. Before archiving it validates the staging tree with
+(archive root `runbook/`) — for example `runbook-1.0.0.tar.gz` for the current
+public source release. Before archiving it validates the staging tree with
 `build/validate-package.php --package=<staging-directory>`, which also checks
 that every relative link in the packaged `README.md` resolves inside the tree
 (and does not escape it through `..` or an absolute path), including the `docs/`

@@ -34,11 +34,13 @@ $includeFiles = [
 	'README.md',
 	'LICENSE',
 	'SECURITY.md',
+	'CHANGELOG.md',
 	// Documentation linked from the packaged README; keep this list in sync with
 	// the relative links in README.md (validate-package.php checks them).
 	'docs/ux-architecture.md',
 	'docs/manual-acceptance-checklist.md',
 	'docs/folder-model.md',
+	'docs/official-1.0.0-readiness.md',
 ];
 
 removeDirectory($stagingParent);

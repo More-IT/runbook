@@ -40,11 +40,12 @@ Runbook allows teams to:
 Runbook does not modify Nextcloud users, groups or global permissions. Nextcloud identities are only referenced for authentication, assignment and access control.
 
 Runbook is designed to be useful for IT, operations, HR, finance, quality, security, customer service, facilities and any other team that relies on repeatable procedures.]]></description>
-    <version>0.5.0</version>
-    <licence>agpl</licence>
-    <author>More-IT</author>
+    <version>1.0.0</version>
+    <licence>AGPL-3.0-or-later</licence>
+    <author mail="webmaster@more-it.co.mz" homepage="https://github.com/More-IT">More-IT</author>
     <namespace>Runbook</namespace>
     <category>tools</category>
+    <bugs>https://github.com/More-IT/runbook/issues</bugs>
     <dependencies>
         <nextcloud min-version="33" max-version="33"/>
         <php min-version="8.2" max-version="8.5"/>
@@ -54,9 +55,11 @@ Runbook is designed to be useful for IT, operations, HR, finance, quality, secur
     </dependencies>
     <navigations>
         <navigation>
+            <id>runbook</id>
             <name>Runbook</name>
             <route>runbook.page.index</route>
             <icon>app.svg</icon>
+            <type>link</type>
             <order>100</order>
         </navigation>
     </navigations>
