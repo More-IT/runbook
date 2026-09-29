@@ -7,7 +7,7 @@ manual sign-off.
 ## Package
 
 - Source branch: `main`
-- Source commit for this report: `26f6afb`
+- Source commit for this report: `4b0ba6b`
 - Application version: `1.0.0`
 - Declared Nextcloud range: `33–35`
 - Declared PHP range: `8.2–8.5`
@@ -25,11 +25,11 @@ manual sign-off.
 - PHP syntax lint, PHPStan, XML, JSON and package validation passed.
 - Production archive validation passed; development-only files were excluded.
 - Production dependency audit reported zero vulnerabilities.
-- Official OpenAPI extractor tooling was installed from the Nextcloud app
-  template pattern. Running it against the current app failed with `No routes
-  or capabilities defined`, confirming that the current legacy JSON routes are
-  not yet an extractable OpenAPI contract.
-- Psalm 5.26 was run with the official-style configuration and reported 442
+- Official OpenAPI extraction now succeeds with 46 generated routes from
+  `FrontpageRoute`/`OpenAPI` attributes and shared response definitions;
+  `composer openapi:check` verifies the committed `openapi.json` for drift in
+  CI. The extractor still emits non-blocking summary-punctuation warnings.
+- Psalm 5.26 was rerun with the official-style configuration and reported 447
   issues. This is recorded as a blocking static-analysis/refactor result; no
   baseline was created to hide the findings.
 
@@ -37,12 +37,12 @@ manual sign-off.
 
 The packaged app was installed into disposable Docker instances with SQLite:
 
-- Nextcloud 33.0.9.1 / PHP 8.4: install, enable, page and authenticated status
-  endpoint passed.
-- Nextcloud 34.0.4.1: install, enable, page and authenticated status endpoint
-  passed.
-- Nextcloud 35.0.1.1: install, enable, page and authenticated status endpoint
-  passed.
+- Nextcloud 33.0.9.1 / PHP 8.4: install, enable, page, authenticated status and
+  template creation passed with the current attribute-routed package.
+- Nextcloud 34.0.4.1 / PHP 8.5: install, enable, page, authenticated status and
+  template creation passed with the current attribute-routed package.
+- Nextcloud 35.0.1.1 / PHP 8.5: install, enable, page, authenticated status and
+  template creation passed with the current attribute-routed package.
 
 On Nextcloud 33, an authenticated API smoke flow also created a template,
 created a section and step, published the template and started a run.
@@ -64,9 +64,8 @@ created a section and step, published the template and started a run.
 - Full real-instance acceptance of Files mounts, permissions, sharing, jobs,
   migrations, notifications, localization and the browser UI.
 - MySQL/MariaDB and PostgreSQL live acceptance; only SQLite was exercised here.
-- A generated, complete OpenAPI contract. The current API uses legacy JSON
-  controllers and hand-written routes; official extraction guidance expects an
-  OCS/typed-controller and Psalm-compatible design.
+- Psalm clean-up and a decision on whether the remaining framework-entry-point
+  findings are handled with annotations/configuration or by further typing.
 - Compatibility decision for Nextcloud 36 / the App Store latest-plus-one rule.
 - Official code-signing certificate and signed `appinfo/signature.json`.
 - GitHub release and App Store submission.
