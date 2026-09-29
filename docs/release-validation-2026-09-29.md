@@ -7,8 +7,7 @@ manual sign-off.
 ## Package
 
 - Source branch: `main`
-- Source commit for this report: working-tree validation after the Psalm/type
-  cleanup; update to the final commit before publishing.
+- Source commit for this report: `f4013e9`
 - Application version: `1.0.0`
 - Declared Nextcloud range: `33–35`
 - Declared PHP range: `8.2–8.5`
@@ -44,6 +43,10 @@ The packaged app was installed into disposable Docker instances with SQLite:
   template creation passed with the current attribute-routed package.
 - Nextcloud 35.0.1.1 / PHP 8.5: install, enable, page, authenticated status and
   template creation passed with the current attribute-routed package.
+- Nextcloud 35.0.1.1 / PHP 8.5 with MariaDB 11: package installation, app
+  enablement and authenticated status passed.
+- Nextcloud 35.0.1.1 / PHP 8.5 with PostgreSQL 16: package installation, app
+  enablement and authenticated status passed.
 
 On Nextcloud 33, an authenticated API smoke flow also created a template,
 created a section and step, published the template and started a run.
@@ -64,9 +67,6 @@ created a section and step, published the template and started a run.
 
 - Full real-instance acceptance of Files mounts, permissions, sharing, jobs,
   migrations, notifications, localization and the browser UI.
-- MySQL/MariaDB and PostgreSQL live acceptance; only SQLite was exercised here.
-- Psalm clean-up and a decision on whether the remaining framework-entry-point
-  findings are handled with annotations/configuration or by further typing.
 - Compatibility decision for Nextcloud 36 / the App Store latest-plus-one rule.
 - Official code-signing certificate and signed `appinfo/signature.json`.
 - GitHub release and App Store submission.
