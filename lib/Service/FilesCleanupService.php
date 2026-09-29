@@ -73,7 +73,6 @@ class FilesCleanupService {
 	 * the intent is durable before the run disappears.
 	 */
 	public function persist(FilesCleanup $record): FilesCleanup {
-		/** @var FilesCleanup $stored */
 		$stored = $this->cleanups->insert($record);
 
 		return $stored;

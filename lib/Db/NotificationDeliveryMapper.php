@@ -23,7 +23,6 @@ class NotificationDeliveryMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var NotificationDelivery $delivery */
 		$delivery = $this->findEntity($qb);
 
 		return $delivery;
@@ -40,7 +39,6 @@ class NotificationDeliveryMapper extends QBMapper {
 			->setMaxResults(1);
 
 		try {
-			/** @var NotificationDelivery $delivery */
 			$delivery = $this->findEntity($qb);
 		} catch (DoesNotExistException) {
 			return null;

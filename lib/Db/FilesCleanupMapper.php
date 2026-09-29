@@ -22,7 +22,6 @@ class FilesCleanupMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var FilesCleanup $cleanup */
 		$cleanup = $this->findEntity($qb);
 
 		return $cleanup;
@@ -41,7 +40,6 @@ class FilesCleanupMapper extends QBMapper {
 			->orderBy('created_at', 'ASC')
 			->addOrderBy('id', 'ASC');
 
-		/** @var list<FilesCleanup> $cleanups */
 		$cleanups = $this->findEntities($qb);
 
 		return $cleanups;

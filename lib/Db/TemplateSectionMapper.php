@@ -22,7 +22,6 @@ class TemplateSectionMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var TemplateSection $section */
 		$section = $this->findEntity($qb);
 
 		return $section;
@@ -39,7 +38,6 @@ class TemplateSectionMapper extends QBMapper {
 			->orderBy('position', 'ASC')
 			->addOrderBy('id', 'ASC');
 
-		/** @var list<TemplateSection> $sections */
 		$sections = $this->findEntities($qb);
 
 		return $sections;

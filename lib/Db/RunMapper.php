@@ -23,7 +23,6 @@ class RunMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var Run $run */
 		$run = $this->findEntity($qb);
 
 		return $run;
@@ -42,7 +41,6 @@ class RunMapper extends QBMapper {
 			->orderBy('updated_at', 'DESC')
 			->addOrderBy('id', 'DESC');
 
-		/** @var list<Run> $runs */
 		$runs = $this->findEntities($qb);
 
 		return $runs;
@@ -69,7 +67,6 @@ class RunMapper extends QBMapper {
 			$qb->setMaxResults($limit);
 		}
 
-		/** @var list<Run> $runs */
 		$runs = $this->findEntities($qb);
 
 		return $runs;
@@ -145,7 +142,6 @@ class RunMapper extends QBMapper {
 			->addOrderBy('id', 'DESC')
 			->setMaxResults($limit);
 
-		/** @var list<Run> $runs */
 		$runs = $this->findEntities($qb);
 
 		return $runs;
@@ -182,7 +178,6 @@ class RunMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->in('id', $qb->createNamedParameter($ids, IQueryBuilder::PARAM_INT_ARRAY)));
 
-		/** @var list<Run> $runs */
 		$runs = $this->findEntities($qb);
 
 		return $runs;

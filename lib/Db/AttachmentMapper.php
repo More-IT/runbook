@@ -22,7 +22,6 @@ class AttachmentMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var Attachment $attachment */
 		$attachment = $this->findEntity($qb);
 
 		return $attachment;
@@ -39,7 +38,6 @@ class AttachmentMapper extends QBMapper {
 			->orderBy('created_at', 'ASC')
 			->addOrderBy('id', 'ASC');
 
-		/** @var list<Attachment> $attachments */
 		$attachments = $this->findEntities($qb);
 
 		return $attachments;
@@ -56,7 +54,6 @@ class AttachmentMapper extends QBMapper {
 			->orderBy('created_at', 'ASC')
 			->addOrderBy('id', 'ASC');
 
-		/** @var list<Attachment> $attachments */
 		$attachments = $this->findEntities($qb);
 
 		return $attachments;

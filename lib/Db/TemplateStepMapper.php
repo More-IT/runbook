@@ -22,7 +22,6 @@ class TemplateStepMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var TemplateStep $step */
 		$step = $this->findEntity($qb);
 
 		return $step;
@@ -39,7 +38,6 @@ class TemplateStepMapper extends QBMapper {
 			->orderBy('position', 'ASC')
 			->addOrderBy('id', 'ASC');
 
-		/** @var list<TemplateStep> $steps */
 		$steps = $this->findEntities($qb);
 
 		return $steps;

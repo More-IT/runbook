@@ -741,7 +741,6 @@ class RunService {
 	private function accessibleRunIds(string $uid): array {
 		$groupIds = $this->access->getUserGroupIds($uid);
 
-		/** @var list<int> $merged */
 		$merged = array_values(array_unique(array_merge(
 			$this->runAclMapper->findRunIdsForPrincipal($uid, $groupIds),
 			$this->runSteps->findDistinctRunIdsForPrincipal($uid, $groupIds),

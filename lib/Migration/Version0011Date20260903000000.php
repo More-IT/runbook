@@ -40,7 +40,6 @@ class Version0011Date20260903000000 extends SimpleMigrationStep {
 	 * @param array<string, mixed> $options
 	 */
 	public function changeSchema(IOutput $output, Closure $schemaClosure, array $options): ?ISchemaWrapper {
-		/** @var ISchemaWrapper $schema */
 		$schema = $schemaClosure();
 		if (!$schema->hasTable('runbook_templates')) {
 			return null;

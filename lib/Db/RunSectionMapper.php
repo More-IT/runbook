@@ -22,7 +22,6 @@ class RunSectionMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var RunSection $section */
 		$section = $this->findEntity($qb);
 
 		return $section;
@@ -39,7 +38,6 @@ class RunSectionMapper extends QBMapper {
 			->orderBy('position', 'ASC')
 			->addOrderBy('id', 'ASC');
 
-		/** @var list<RunSection> $sections */
 		$sections = $this->findEntities($qb);
 
 		return $sections;
@@ -59,7 +57,6 @@ class RunSectionMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->in('id', $qb->createNamedParameter($ids, IQueryBuilder::PARAM_INT_ARRAY)));
 
-		/** @var list<RunSection> $sections */
 		$sections = $this->findEntities($qb);
 
 		return $sections;

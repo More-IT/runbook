@@ -26,7 +26,6 @@ class RunStepMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var RunStep $step */
 		$step = $this->findEntity($qb);
 
 		return $step;
@@ -43,7 +42,6 @@ class RunStepMapper extends QBMapper {
 			->orderBy('position', 'ASC')
 			->addOrderBy('id', 'ASC');
 
-		/** @var list<RunStep> $steps */
 		$steps = $this->findEntities($qb);
 
 		return $steps;
@@ -70,7 +68,6 @@ class RunStepMapper extends QBMapper {
 			->orderBy('position', 'ASC')
 			->addOrderBy('id', 'ASC');
 
-		/** @var list<RunStep> $steps */
 		$steps = $this->findEntities($qb);
 
 		return $steps;
@@ -90,7 +87,6 @@ class RunStepMapper extends QBMapper {
 			->orderBy('s.position', 'ASC')
 			->addOrderBy('s.id', 'ASC');
 
-		/** @var list<RunStep> $steps */
 		$steps = $this->findEntities($qb);
 
 		return $steps;
@@ -111,7 +107,6 @@ class RunStepMapper extends QBMapper {
 			->addOrderBy('id', 'ASC')
 			->setMaxResults($limit);
 
-		/** @var list<RunStep> $steps */
 		$steps = $this->findEntities($qb);
 
 		return $steps;
@@ -136,7 +131,6 @@ class RunStepMapper extends QBMapper {
 			)
 			->setMaxResults(1);
 
-		/** @var list<RunStep> $steps */
 		$steps = $this->findEntities($qb);
 
 		return $steps;
@@ -272,7 +266,6 @@ class RunStepMapper extends QBMapper {
 			->orderBy('s.due_at', 'ASC')
 			->addOrderBy('s.id', 'ASC');
 
-		/** @var list<RunStep> $steps */
 		$steps = $this->findEntities($qb);
 
 		return $steps;
@@ -291,7 +284,6 @@ class RunStepMapper extends QBMapper {
 			->orderBy('s.due_at', 'DESC')
 			->addOrderBy('s.id', 'DESC');
 
-		/** @var list<RunStep> $steps */
 		$steps = $this->findEntities($qb);
 
 		return $steps;

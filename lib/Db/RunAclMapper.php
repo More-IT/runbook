@@ -23,7 +23,6 @@ class RunAclMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var RunAcl $entry */
 		$entry = $this->findEntity($qb);
 
 		return $entry;
@@ -41,7 +40,6 @@ class RunAclMapper extends QBMapper {
 			->addOrderBy('principal_id', 'ASC')
 			->addOrderBy('id', 'ASC');
 
-		/** @var list<RunAcl> $entries */
 		$entries = $this->findEntities($qb);
 
 		return $entries;

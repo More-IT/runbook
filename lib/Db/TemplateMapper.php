@@ -22,7 +22,6 @@ class TemplateMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var Template $template */
 		$template = $this->findEntity($qb);
 
 		return $template;
@@ -58,7 +57,6 @@ class TemplateMapper extends QBMapper {
 		$qb->orderBy('updated_at', 'DESC')
 			->addOrderBy('id', 'DESC');
 
-		/** @var list<Template> $templates */
 		$templates = $this->findEntities($qb);
 
 		return $templates;
@@ -99,7 +97,6 @@ class TemplateMapper extends QBMapper {
 			->addOrderBy('id', 'DESC')
 			->setMaxResults($limit);
 
-		/** @var list<Template> $templates */
 		$templates = $this->findEntities($qb);
 
 		return $templates;

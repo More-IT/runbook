@@ -23,7 +23,6 @@ class TemplateAclMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var TemplateAcl $entry */
 		$entry = $this->findEntity($qb);
 
 		return $entry;
@@ -41,7 +40,6 @@ class TemplateAclMapper extends QBMapper {
 			->addOrderBy('principal_id', 'ASC')
 			->addOrderBy('id', 'ASC');
 
-		/** @var list<TemplateAcl> $entries */
 		$entries = $this->findEntities($qb);
 
 		return $entries;

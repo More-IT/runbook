@@ -34,7 +34,6 @@ class Version0014Date20260906000000 extends SimpleMigrationStep {
 	 * @param array<string, mixed> $options
 	 */
 	public function changeSchema(IOutput $output, Closure $schemaClosure, array $options): ?ISchemaWrapper {
-		/** @var ISchemaWrapper $schema */
 		$schema = $schemaClosure();
 		$changed = false;
 

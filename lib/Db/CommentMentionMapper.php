@@ -22,7 +22,6 @@ class CommentMentionMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var CommentMention $mention */
 		$mention = $this->findEntity($qb);
 
 		return $mention;
@@ -38,7 +37,6 @@ class CommentMentionMapper extends QBMapper {
 			->where($qb->expr()->eq('comment_id', $qb->createNamedParameter($commentId, IQueryBuilder::PARAM_INT)))
 			->orderBy('id', 'ASC');
 
-		/** @var list<CommentMention> $mentions */
 		$mentions = $this->findEntities($qb);
 
 		return $mentions;
@@ -64,7 +62,6 @@ class CommentMentionMapper extends QBMapper {
 			))
 			->orderBy('id', 'ASC');
 
-		/** @var list<CommentMention> $mentions */
 		$mentions = $this->findEntities($qb);
 
 		return $mentions;

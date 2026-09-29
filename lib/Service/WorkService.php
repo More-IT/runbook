@@ -199,7 +199,6 @@ class WorkService {
 		$aclRunIds = $this->runAclMapper->findRunIdsForPrincipal($uid, $groupIds);
 		$assignedRunIds = $this->runSteps->findDistinctRunIdsForPrincipal($uid, $groupIds);
 
-		/** @var list<int> $merged */
 		$merged = array_values(array_unique(array_merge($aclRunIds, $assignedRunIds)));
 
 		return $merged;

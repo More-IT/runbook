@@ -22,7 +22,6 @@ class ActivityMapper extends QBMapper {
 			->from($this->tableName)
 			->where($qb->expr()->eq('id', $qb->createNamedParameter($id, IQueryBuilder::PARAM_INT)));
 
-		/** @var ActivityEvent $event */
 		$event = $this->findEntity($qb);
 
 		return $event;
@@ -42,7 +41,6 @@ class ActivityMapper extends QBMapper {
 			->addOrderBy('id', $descending ? 'DESC' : 'ASC')
 			->setMaxResults($limit);
 
-		/** @var list<ActivityEvent> $events */
 		$events = $this->findEntities($qb);
 
 		return $events;

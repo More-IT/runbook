@@ -32,8 +32,8 @@ Evidence from the current validation pass is recorded in
       verifies the committed contract for drift in CI. The extractor currently
       reports non-blocking summary-punctuation warnings.
 - [ ] Make the new Psalm gate pass. Framework entry-point false positives are
-      configured explicitly, reducing the current run to 244 real findings;
-      no baseline is used to hide them.
+      configured explicitly, and Psalm's mechanical cleanup reduced the current
+      run to 186 real findings; no baseline is used to hide them.
 - [ ] Run acceptance tests on a real supported Nextcloud instance, including
       Files mounts, permissions, migrations, background jobs and upgrades.
 - [x] Verify on a disposable Nextcloud 33 instance that 0.5.0 → 1.0.0

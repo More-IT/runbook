@@ -36,8 +36,12 @@ abstract class ApiController extends Controller {
 	 * Read a request parameter through a helper so public controller methods can
 	 * expose typed parameters to the OpenAPI extractor while retaining the
 	 * legacy unit-test and controller invocation path.
+	 *
+	 * @param null|string $default
+	 *
+	 * @psalm-param ''|'all'|null $default
 	 */
-	protected function param(string $name, mixed $default = null): mixed {
+	protected function param(string $name, ?string $default = null): mixed {
 		return $this->request->getParam($name, $default);
 	}
 

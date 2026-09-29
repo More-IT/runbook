@@ -32,7 +32,6 @@ class Version0006Date20260601000000 extends SimpleMigrationStep {
 	 * @param array<string, mixed> $options
 	 */
 	public function changeSchema(IOutput $output, Closure $schemaClosure, array $options): ?ISchemaWrapper {
-		/** @var ISchemaWrapper $schema */
 		$schema = $schemaClosure();
 
 		if ($schema->hasTable('runbook_notification_deliveries')) {
