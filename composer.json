@@ -9,6 +9,7 @@
         }
     ],
     "require": {
+        "bamarni/composer-bin-plugin": "^1.8",
         "php": "^8.2"
     },
     "require-dev": {
@@ -36,14 +37,28 @@
         ]
     },
     "config": {
+        "allow-plugins": {
+            "bamarni/composer-bin-plugin": true
+        },
         "optimize-autoloader": true,
         "sort-packages": true
     },
     "scripts": {
+        "post-install-cmd": [
+            "@composer bin all install --ansi"
+        ],
+        "post-update-cmd": [
+            "@composer bin all install --ansi"
+        ],
         "lint:php": "php-cs-fixer fix --dry-run --diff",
         "lint:php:fix": "php-cs-fixer fix",
         "lint:php:syntax": "php build/php-lint.php",
+        "cs:check": "php-cs-fixer fix --dry-run --diff",
+        "cs:fix": "php-cs-fixer fix",
         "phpstan": "phpstan analyse --memory-limit=1G",
+        "psalm": "psalm --threads=1 --no-cache",
+        "openapi": "generate-spec",
+        "rector": "rector",
         "test": "phpunit",
         "test:unit": "phpunit --testsuite unit",
         "test:migration": "phpunit --filter MigrationSchema",

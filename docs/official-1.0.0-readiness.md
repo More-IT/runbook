@@ -16,6 +16,8 @@ Evidence from the current validation pass is recorded in
 - [x] Node version pinned to the CI version through `.nvmrc`.
 - [x] Stylelint configuration and CI validation added.
 - [x] Existing package, test and security validation retained.
+- [x] Official OpenAPI extractor, Psalm and Rector vendor-bin tooling added as
+      the basis for the remaining API refactor and static-analysis gate.
 
 ## Required before App Store submission
 
@@ -28,6 +30,9 @@ Evidence from the current validation pass is recorded in
       legacy JSON controllers and hand-written `appinfo/routes.php`; official
       extraction requires an OCS/typed-controller decision, Psalm coverage and
       a generated spec that is checked for drift in CI.
+- [ ] Make the new Psalm gate pass. The first baseline run reports 442 issues,
+      so enabling it in blocking CI before the typing/refactor work would be
+      misleading.
 - [ ] Run acceptance tests on a real supported Nextcloud instance, including
       Files mounts, permissions, migrations, background jobs and upgrades.
 - [x] Verify on a disposable Nextcloud 33 instance that 0.5.0 → 1.0.0

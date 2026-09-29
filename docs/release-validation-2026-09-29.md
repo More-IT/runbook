@@ -7,7 +7,7 @@ manual sign-off.
 ## Package
 
 - Source branch: `main`
-- Source commit before this report: `fe99441`
+- Source commit for this report: `26f6afb`
 - Application version: `1.0.0`
 - Declared Nextcloud range: `33–35`
 - Declared PHP range: `8.2–8.5`
@@ -25,6 +25,13 @@ manual sign-off.
 - PHP syntax lint, PHPStan, XML, JSON and package validation passed.
 - Production archive validation passed; development-only files were excluded.
 - Production dependency audit reported zero vulnerabilities.
+- Official OpenAPI extractor tooling was installed from the Nextcloud app
+  template pattern. Running it against the current app failed with `No routes
+  or capabilities defined`, confirming that the current legacy JSON routes are
+  not yet an extractable OpenAPI contract.
+- Psalm 5.26 was run with the official-style configuration and reported 442
+  issues. This is recorded as a blocking static-analysis/refactor result; no
+  baseline was created to hide the findings.
 
 ## Real Nextcloud runtime smoke tests
 
@@ -64,4 +71,7 @@ created a section and step, published the template and started a run.
 - Official code-signing certificate and signed `appinfo/signature.json`.
 - GitHub release and App Store submission.
 
-No GitHub push or App Store action was performed from this validation run.
+An earlier preliminary push left GitHub `main` at `fe99441`; no later
+validation commit, final `v1.0.0` tag, GitHub release or App Store action was
+performed from this validation run. The remote branch must not be treated as
+the final public release.
