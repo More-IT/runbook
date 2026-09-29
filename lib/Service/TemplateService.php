@@ -426,6 +426,7 @@ class TemplateService {
 		}
 
 		if (array_key_exists('conditions', $data) || array_key_exists('condition', $data)) {
+			/** @psalm-suppress MixedAssignment Request condition payload is normalized by normalizeConditions. */
 			$raw = array_key_exists('conditions', $data) ? $data['conditions'] : $data['condition'];
 			$conditions = $this->normalizeConditions($raw, $section->getTemplateId(), $section->getId());
 			$this->assertNoAmbiguousCondition($section->getTemplateId(), $section->getId(), $conditions);
@@ -891,6 +892,7 @@ class TemplateService {
 		}
 
 		$ids = [];
+		/** @psalm-suppress MixedAssignment Dependency values are validated before conversion. */
 		foreach ($raw as $value) {
 			if (is_int($value) || (is_string($value) && preg_match('/^[0-9]+$/', $value) === 1)) {
 				$ids[] = (int)$value;
@@ -988,6 +990,7 @@ class TemplateService {
 			if (!is_array($entry) || array_is_list($entry)) {
 				throw new ValidationException('invalid_condition');
 			}
+			/** @var array<string, mixed> $entry */
 			$condition = $this->normalizeCondition($entry, $templateId, $sectionId);
 			$signature = json_encode($condition, JSON_THROW_ON_ERROR);
 			if (isset($signatures[$signature])) {
@@ -1053,9 +1056,11 @@ class TemplateService {
 			}
 			$condition['value'] = (float)$value;
 		} elseif ($type === StepType::Select) {
+			/** @psalm-suppress MixedAssignment Configuration values originate in validated JSON. */
 			$options = $step->getConfigArray()['options'] ?? null;
 			$allowedValues = [];
 			if (is_array($options)) {
+				/** @psalm-suppress MixedAssignment Configuration options are validated as strings below. */
 				foreach ($options as $option) {
 					if (is_string($option)) {
 						$allowedValues[] = $option;
@@ -1264,6 +1269,7 @@ class TemplateService {
 	 */
 	private function validateConfig(StepType $type, array $config): array {
 		$normalized = [];
+		/** @psalm-suppress MixedAssignment Configuration values are validated by the type-specific branches below. */
 		foreach ($config as $key => $value) {
 			$normalized[(string)$key] = $value;
 		}

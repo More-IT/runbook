@@ -101,6 +101,7 @@ class TemplateStep extends Entity {
 		}
 
 		$config = [];
+		/** @psalm-suppress MixedAssignment JSON configuration values are intentionally untyped. */
 		foreach ($decoded as $key => $value) {
 			$config[(string)$key] = $value;
 		}

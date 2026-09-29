@@ -85,6 +85,7 @@ class StepResponseValidator {
 		}
 
 		$allowed = [];
+		/** @psalm-suppress MixedAssignment Options come from validated JSON configuration. */
 		foreach ($options as $option) {
 			if (is_string($option)) {
 				$allowed[] = $option;

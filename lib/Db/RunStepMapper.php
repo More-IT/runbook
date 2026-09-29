@@ -151,6 +151,7 @@ class RunStepMapper extends QBMapper {
 
 		$result = $qb->executeQuery();
 		$runIds = [];
+		/** @psalm-suppress MixedAssignment, MixedArrayAccess DB row shape is defined by the select below. */
 		while (($row = $result->fetch()) !== false) {
 			$runIds[] = (int)$row['run_id'];
 		}
@@ -185,10 +186,10 @@ class RunStepMapper extends QBMapper {
 			);
 
 		$result = $qb->executeQuery();
-		$count = $result->fetchOne();
+		$count = (int)$result->fetchOne();
 		$result->closeCursor();
 
-		return (int)$count;
+		return $count;
 	}
 
 	/**
@@ -219,10 +220,10 @@ class RunStepMapper extends QBMapper {
 			);
 
 		$result = $qb->executeQuery();
-		$count = $result->fetchOne();
+		$count = (int)$result->fetchOne();
 		$result->closeCursor();
 
-		return (int)$count;
+		return $count;
 	}
 
 	/**
@@ -243,10 +244,10 @@ class RunStepMapper extends QBMapper {
 			);
 
 		$result = $qb->executeQuery();
-		$count = $result->fetchOne();
+		$count = (int)$result->fetchOne();
 		$result->closeCursor();
 
-		return (int)$count;
+		return $count;
 	}
 
 	/**

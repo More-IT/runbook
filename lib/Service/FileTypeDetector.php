@@ -10,7 +10,7 @@ namespace OCA\Runbook\Service;
  * Client-provided MIME types are never trusted.
  */
 class FileTypeDetector {
-	public function detect(string $content, string $filename): string {
+	public function detect(string $content, string $_filename): string {
 		$finfo = new \finfo(FILEINFO_MIME_TYPE);
 		$detected = $finfo->buffer($content);
 		if (!is_string($detected) || $detected === '') {

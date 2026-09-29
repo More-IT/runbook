@@ -338,7 +338,7 @@ class AdminSettings {
 			return $reference;
 		}
 
-		if ($legacy !== null && $legacy['complete'] && $legacy['reference'] !== null) {
+		if ($legacy['complete']) {
 			return $legacy['reference'];
 		}
 

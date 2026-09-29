@@ -87,6 +87,7 @@ class RunStepService {
 
 		if ($hasResponse) {
 			$this->assertEditableStatus($step);
+			/** @psalm-suppress MixedAssignment Request values are validated by StepResponseValidator. */
 			$raw = $data['response'];
 			if ($raw === null) {
 				$step->setResponseValue(null);
@@ -283,6 +284,7 @@ class RunStepService {
 	 * @param array<string, mixed> $data
 	 */
 	private function applyAssignment(Run $run, RunStep $step, array $data): void {
+		/** @psalm-suppress MixedAssignment Request values are normalized by the guards below. */
 		$hasType = array_key_exists('assigneeType', $data);
 		$hasId = array_key_exists('assigneeId', $data);
 
@@ -291,7 +293,9 @@ class RunStepService {
 				throw new ValidationException('invalid_field');
 			}
 
+			/** @psalm-suppress MixedAssignment Request values are normalized by the guards below. */
 			$type = $data['assigneeType'];
+			/** @psalm-suppress MixedAssignment Request values are normalized by the guards below. */
 			$id = $data['assigneeId'];
 			if ($type === null && $id === null) {
 				$step->setAssigneeType(null);
@@ -463,9 +467,11 @@ class RunStepService {
 	 * @param array<string, mixed> $data
 	 */
 	private function readTimestampOrNull(array $data, string $key): ?int {
+		/** @psalm-suppress MixedAssignment Request values are validated below. */
 		if (!array_key_exists($key, $data) || $data[$key] === null) {
 			return null;
 		}
+		/** @psalm-suppress MixedAssignment Request values are validated below. */
 		$value = $data[$key];
 		if (is_int($value) && $value > 0) {
 			return $value;

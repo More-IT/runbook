@@ -44,10 +44,7 @@ class ActivityController extends ApiController {
 	#[FrontpageRoute(verb: 'GET', url: '/api/v1/runs/{id}/activity')]
 	public function index(?int $id = null, ?int $limit = null, ?string $order = null): JSONResponse {
 		$id ??= $this->requireId('id');
-		$rawLimit = $this->param('limit');
-		if ($limit === null && $rawLimit !== null) {
-			$limit = is_int($rawLimit) ? $rawLimit : (is_string($rawLimit) && preg_match('/^[0-9]+$/', $rawLimit) === 1 ? (int)$rawLimit : null);
-		}
+		$limit ??= $this->optionalInt('limit');
 		$rawOrder = $this->param('order');
 		if ($order === null && $rawOrder !== null) {
 			$order = is_string($rawOrder) ? $rawOrder : null;

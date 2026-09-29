@@ -31,9 +31,9 @@ Evidence from the current validation pass is recorded in
       definitions and a generated `openapi.json`; `composer openapi:check`
       verifies the committed contract for drift in CI. The extractor currently
       reports non-blocking summary-punctuation warnings.
-- [ ] Make the new Psalm gate pass. Framework entry-point false positives are
-      configured explicitly, and Psalm's mechanical cleanup reduced the current
-      run to 129 real findings; no baseline is used to hide them.
+- [x] Make the new Psalm gate pass. Psalm now reports no errors; framework and
+      JSON/DB boundary exceptions are explicit and local, with no baseline used
+      to hide findings.
 - [ ] Run acceptance tests on a real supported Nextcloud instance, including
       Files mounts, permissions, migrations, background jobs and upgrades.
 - [x] Verify on a disposable Nextcloud 33 instance that 0.5.0 → 1.0.0

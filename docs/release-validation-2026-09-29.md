@@ -7,7 +7,8 @@ manual sign-off.
 ## Package
 
 - Source branch: `main`
-- Source commit for this report: `4b0ba6b`
+- Source commit for this report: working-tree validation after the Psalm/type
+  cleanup; update to the final commit before publishing.
 - Application version: `1.0.0`
 - Declared Nextcloud range: `33–35`
 - Declared PHP range: `8.2–8.5`
@@ -29,11 +30,9 @@ manual sign-off.
   `FrontpageRoute`/`OpenAPI` attributes and shared response definitions;
   `composer openapi:check` verifies the committed `openapi.json` for drift in
   CI. The extractor still emits non-blocking summary-punctuation warnings.
-- Psalm 5.26 was rerun with explicit suppressions only for Nextcloud's dynamic
-  framework entry points and mechanical annotation cleanup, and reported 129
-  remaining issues. This is recorded as
-  a blocking static-analysis/refactor result; no baseline was created to hide
-  the findings.
+- Psalm 5.26 was rerun and reported no errors. Suppressions are explicit and
+  local to framework, JSON and DB boundaries; no baseline was created to hide
+  findings.
 
 ## Real Nextcloud runtime smoke tests
 

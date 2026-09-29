@@ -240,8 +240,9 @@ class NotificationService {
 			$delivery->setType($subject);
 			$delivery->setUserUid($uid);
 			$delivery->setRunId((int)($params['runId'] ?? 0));
-			$stepId = $params['stepId'] ?? null;
-			$delivery->setStepId(is_int($stepId) ? $stepId : null);
+			$delivery->setStepId(
+				isset($params['stepId']) && is_int($params['stepId']) ? $params['stepId'] : null,
+			);
 			$delivery->setStatus(NotificationDelivery::STATUS_PENDING);
 			$delivery->setAttempts(1);
 			$delivery->setCreatedAt($now);

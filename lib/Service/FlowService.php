@@ -327,6 +327,7 @@ class FlowService {
 			'operator' => (string)($condition['operator'] ?? ''),
 		];
 		if (array_key_exists('value', $condition)) {
+			/** @psalm-suppress MixedAssignment JSON condition values are intentionally untyped. */
 			$reason['expected'] = $condition['value'];
 		}
 

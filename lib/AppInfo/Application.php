@@ -37,7 +37,11 @@ class Application extends App implements IBootstrap {
 		$context->registerSearchProvider(Provider::class);
 		$context->registerService(
 			FilesRootProvider::class,
-			static fn (ContainerInterface $container): FilesRootProvider => $container->get(NextcloudFilesRootProvider::class),
+			static function (ContainerInterface $container): FilesRootProvider {
+				/** @var FilesRootProvider $provider */
+				$provider = $container->get(NextcloudFilesRootProvider::class);
+				return $provider;
+			},
 		);
 	}
 

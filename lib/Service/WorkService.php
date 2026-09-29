@@ -65,6 +65,7 @@ class WorkService {
 		$now = $this->timeFactory->getTime();
 		[$todayStart, $todayEnd] = $this->dayRange($uid, $now);
 
+		/** @var list<array{run: Run, section: RunSection, step: RunStep, overdue: bool, dueToday: bool}> $items */
 		$items = [];
 		$unavailableCache = [];
 		foreach ($this->assignedItems($uid) as $item) {
@@ -105,6 +106,9 @@ class WorkService {
 		}
 
 		usort($items, static function (array $a, array $b): int {
+			/** @param array{run: Run, section: RunSection, step: RunStep, overdue: bool, dueToday: bool} $a */
+			/** @param array{run: Run, section: RunSection, step: RunStep, overdue: bool, dueToday: bool} $b */
+			/** @psalm-suppress MixedArgumentTypeCoercion The usort callback receives the typed work-item list built above. */
 			return self::compareWorkItems($a, $b);
 		});
 
@@ -294,6 +298,7 @@ class WorkService {
 	}
 
 	private function userTimeZone(string $uid): \DateTimeZone {
+		/** @psalm-suppress DeprecatedMethod Nextcloud 33 compatibility requires this API. */
 		$timezone = $this->config->getUserValue($uid, 'core', 'timezone', '');
 		if (is_string($timezone) && $timezone !== '') {
 			try {

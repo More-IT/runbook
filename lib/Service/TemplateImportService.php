@@ -19,8 +19,11 @@ use OCA\Runbook\Db\Template;
  * validation in {@see TemplateService} instead of duplicating the flow engine.
  *
  * @phpstan-type ImportCondition array{stepRef: string, operator: string, value?: mixed}
- * @phpstan-type ImportStep array{ref: string, title: string, description: string, type: string, required: bool, position: int, config: array<string, mixed>, defaultAssignee: string|null, dueOffset: string|null}
+ * @phpstan-type ImportStep array{ref: string, title: string, description: string, type: string, required: bool, position: int, order: int, sectionRef: string, config: array<string, mixed>, defaultAssignee: string|null, dueOffset: string|null}
  * @phpstan-type ImportSection array{ref: string, title: string, description: string, notes: string, dependsOn: list<string>, conditions: list<ImportCondition>, steps: list<ImportStep>}
+ * @psalm-type ImportCondition = array{stepRef: string, operator: string, value?: mixed}
+ * @psalm-type ImportStep = array{ref: string, title: string, description: string, type: string, required: bool, position: int, order: int, sectionRef: string, config: array<string, mixed>, defaultAssignee: string|null, dueOffset: string|null}
+ * @psalm-type ImportSection = array{ref: string, title: string, description: string, notes: string, dependsOn: list<string>, conditions: list<ImportCondition>, steps: list<ImportStep>}
  */
 class TemplateImportService {
 	public const FORMAT = 'runbook-template';
@@ -97,13 +100,11 @@ class TemplateImportService {
 	 * @throws ValidationException When the collection counts exceed the limits.
 	 */
 	public static function assertCollectionLimits(array $document): void {
-		if (is_array($document['sections'] ?? null)
-			&& array_is_list($document['sections'])
+		if (isset($document['sections']) && is_array($document['sections'])
 			&& count($document['sections']) > self::MAX_SECTIONS) {
 			throw new ValidationException('import_too_many_sections');
 		}
-		if (is_array($document['steps'] ?? null)
-			&& array_is_list($document['steps'])
+		if (isset($document['steps']) && is_array($document['steps'])
 			&& count($document['steps']) > self::MAX_STEPS) {
 			throw new ValidationException('import_too_many_steps');
 		}
@@ -177,10 +178,14 @@ class TemplateImportService {
 	 * @param array<string, mixed> $document
 	 */
 	private function createTemplate(array $document): Template {
-		$metadata = $document['template'];
-		$data = ['title' => $metadata['title']];
+		$metadata = $document['template'] ?? null;
+		if (!is_array($metadata)) {
+			throw new ValidationException('invalid_import_document');
+		}
+		/** @var array<string, mixed> $metadata */
+		$data = ['title' => $this->requireString($metadata, 'title')];
 		if (array_key_exists('description', $metadata)) {
-			$data['description'] = $metadata['description'];
+			$data['description'] = $this->optionalString($metadata, 'description');
 		}
 
 		return $this->templates->createTemplate($data);
@@ -208,7 +213,9 @@ class TemplateImportService {
 			$conditions = array_map(
 				static function (array $condition) use ($stepIds): array {
 					$mapped = ['stepId' => $stepIds[$condition['stepRef']], 'operator' => $condition['operator']];
+					/** @var array{stepId: int, operator: string, value?: mixed} $mapped */
 					if (array_key_exists('value', $condition)) {
+						/** @psalm-suppress MixedAssignment JSON condition values are intentionally untyped. */
 						$mapped['value'] = $condition['value'];
 					}
 
@@ -283,6 +290,8 @@ class TemplateImportService {
 	/**
 	 * @param list<mixed> $rawSections
 	 * @return list<ImportSection>
+	 * @psalm-suppress MoreSpecificReturnType
+	 * @psalm-suppress LessSpecificReturnStatement
 	 */
 	private function normalizeSections(array $rawSections): array {
 		$sections = [];
@@ -291,6 +300,7 @@ class TemplateImportService {
 			if (!is_array($raw)) {
 				throw new ValidationException('invalid_import_document');
 			}
+			/** @var array<string, mixed> $raw */
 
 			$ref = $this->requireString($raw, 'ref');
 			if (preg_match('/^s[0-9]+$/', $ref) !== 1) {
@@ -312,6 +322,8 @@ class TemplateImportService {
 			];
 		}
 
+		/** @psalm-suppress MoreSpecificReturnType */
+		/** @psalm-suppress LessSpecificReturnStatement */
 		return $sections;
 	}
 
@@ -327,6 +339,7 @@ class TemplateImportService {
 			if (!is_array($raw)) {
 				throw new ValidationException('invalid_import_document');
 			}
+			/** @var array<string, mixed> $raw */
 
 			$ref = $this->requireString($raw, 'ref');
 			if (preg_match('/^t[0-9]+$/', $ref) !== 1) {
@@ -355,6 +368,7 @@ class TemplateImportService {
 			// object, so a decoded document may carry a stdClass here; accept
 			// both shapes and normalise to an associative array.
 			$config = $config === null ? [] : (array)$config;
+			/** @var array<string, mixed> $config */
 
 			$assignee = $raw['defaultAssignee'] ?? null;
 			if ($assignee !== null && !is_string($assignee)) {
@@ -390,7 +404,7 @@ class TemplateImportService {
 	 * collection bounds that are checked after normalisation.
 	 *
 	 * @param list<ImportSection> $sections
-	 * @param list<array{ref: string, sectionRef: string}> $steps
+	 * @param list<ImportStep> $steps
 	 */
 	private function assertReferences(array $sections, array $steps): void {
 		$sectionRefs = [];
@@ -436,6 +450,7 @@ class TemplateImportService {
 	 */
 	private function attachSteps(array $sections, array $steps): array {
 		$indexByRef = [];
+		/** @var list<list<ImportStep>> $buckets */
 		$buckets = [];
 		foreach ($sections as $index => $section) {
 			$indexByRef[$section['ref']] = $index;
@@ -450,10 +465,11 @@ class TemplateImportService {
 			$buckets[$index][] = $step;
 		}
 
-		foreach ($sections as $index => $section) {
+		for ($index = 0; $index < count($sections); $index++) {
 			$sections[$index]['steps'] = $buckets[$index];
 		}
 
+		$sections = array_values($sections);
 		return $sections;
 	}
 
@@ -478,7 +494,7 @@ class TemplateImportService {
 	/**
 	 * Verify that every non-null default assignee resolves to a local principal.
 	 *
-	 * @param list<array{defaultAssignee: string|null}> $steps
+	 * @param list<ImportStep> $steps
 	 */
 	private function assertAssignees(array $steps): void {
 		foreach ($steps as $step) {
@@ -511,6 +527,7 @@ class TemplateImportService {
 			if (!is_array($condition)) {
 				throw new ValidationException('invalid_import_document');
 			}
+			/** @var array<string, mixed> $condition */
 			$stepRef = $this->requireString($condition, 'stepRef');
 			if (preg_match('/^t[0-9]+$/', $stepRef) !== 1) {
 				throw new ValidationException('invalid_import_reference');
@@ -520,6 +537,7 @@ class TemplateImportService {
 				'operator' => $this->requireString($condition, 'operator'),
 			];
 			if (array_key_exists('value', $condition)) {
+				/** @psalm-suppress MixedAssignment JSON condition values are intentionally untyped. */
 				$normalized['value'] = $condition['value'];
 			}
 			$conditions[] = $normalized;

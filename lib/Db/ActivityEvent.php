@@ -64,6 +64,7 @@ class ActivityEvent extends Entity {
 		}
 
 		$metadata = [];
+		/** @psalm-suppress MixedAssignment JSON metadata is intentionally untyped. */
 		foreach ($decoded as $key => $value) {
 			$metadata[(string)$key] = $value;
 		}

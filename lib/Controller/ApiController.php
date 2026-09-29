@@ -22,14 +22,20 @@ abstract class ApiController extends Controller {
 	 */
 	protected function body(array $fields): array {
 		$params = $this->request->getParams();
-		$data = [];
-		foreach ($fields as $field) {
-			if (array_key_exists($field, $params)) {
-				$data[$field] = $params[$field];
-			}
-		}
+		/** @var array<string, mixed> $params */
+		return array_intersect_key($params, array_flip($fields));
+	}
 
-		return $data;
+	/**
+	 * Return request parameters with the broad Nextcloud request type narrowed
+	 * to the scalar values accepted by the public JSON routes.
+	 *
+	 * @return array<string, mixed>
+	 */
+	protected function requestParams(): array {
+		/** @var array<string, mixed> $params */
+		$params = $this->request->getParams();
+		return $params;
 	}
 
 	/**
@@ -40,9 +46,10 @@ abstract class ApiController extends Controller {
 	 * @param null|string $default
 	 *
 	 * @psalm-param ''|'all'|null $default
+	 * @return string|int|null
 	 */
-	protected function param(string $name, ?string $default = null): mixed {
-		return $this->request->getParam($name, $default);
+	protected function param(string $name, ?string $default = null): string|int|null {
+		return $this->normaliseScalar($this->request->getParam($name, $default));
 	}
 
 	/**
@@ -61,14 +68,14 @@ abstract class ApiController extends Controller {
 	 * Read an optional, non-negative integer request parameter.
 	 */
 	protected function optionalInt(string $name, ?int $default = null): ?int {
-		$value = $this->request->getParam($name);
+		$value = $this->normaliseScalar($this->request->getParam($name));
 		if ($value === null) {
 			return $default;
 		}
 		if (is_int($value)) {
 			return $value;
 		}
-		if (is_string($value) && preg_match('/^[0-9]+$/', $value) === 1) {
+		if (preg_match('/^[0-9]+$/', $value) === 1) {
 			return (int)$value;
 		}
 
@@ -79,12 +86,20 @@ abstract class ApiController extends Controller {
 	 * Read a required integer request parameter.
 	 */
 	protected function requireInt(string $name): int {
-		$value = $this->request->getParam($name);
+		$value = $this->normaliseScalar($this->request->getParam($name));
 		if (is_int($value)) {
 			return $value;
 		}
 		if (is_string($value) && preg_match('/^-?[0-9]+$/', $value) === 1) {
 			return (int)$value;
+		}
+
+		throw new ValidationException('invalid_field');
+	}
+
+	private function normaliseScalar(mixed $value): string|int|null {
+		if ($value === null || is_string($value) || is_int($value)) {
+			return $value;
 		}
 
 		throw new ValidationException('invalid_field');

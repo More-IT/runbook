@@ -83,6 +83,7 @@ class RunAclMapper extends QBMapper {
 
 		$result = $qb->executeQuery();
 		$runIds = [];
+		/** @psalm-suppress MixedAssignment, MixedArrayAccess DB row shape is defined by the select below. */
 		while (($row = $result->fetch()) !== false) {
 			$runIds[] = (int)$row['run_id'];
 		}

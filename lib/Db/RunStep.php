@@ -148,6 +148,7 @@ class RunStep extends Entity {
 		}
 
 		$config = [];
+		/** @psalm-suppress MixedAssignment JSON configuration values are intentionally untyped. */
 		foreach ($decoded as $key => $value) {
 			$config[(string)$key] = $value;
 		}
@@ -170,6 +171,7 @@ class RunStep extends Entity {
 			return null;
 		}
 
+		/** @psalm-suppress MixedAssignment JSON response is narrowed below. */
 		$decoded = json_decode($this->response, true);
 		if (is_bool($decoded) || is_int($decoded) || is_float($decoded) || is_string($decoded)) {
 			return $decoded;

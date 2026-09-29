@@ -83,6 +83,7 @@ class TemplateAclMapper extends QBMapper {
 
 		$result = $qb->executeQuery();
 		$templateIds = [];
+		/** @psalm-suppress MixedAssignment, MixedArrayAccess DB row shape is defined by the select below. */
 		while (($row = $result->fetch()) !== false) {
 			$templateIds[] = (int)$row['template_id'];
 		}

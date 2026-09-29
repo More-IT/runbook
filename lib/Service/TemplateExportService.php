@@ -99,7 +99,7 @@ class TemplateExportService {
 		}
 
 		$exportSteps = [];
-		foreach ($prepared as [$section, $sectionRef, $steps]) {
+		foreach ($prepared as [$_section, $sectionRef, $steps]) {
 			foreach ($steps as $step) {
 				$exportSteps[] = [
 					'ref' => $stepRefs[$step->getId()],
@@ -185,6 +185,7 @@ class TemplateExportService {
 				'operator' => (string)($condition['operator'] ?? ''),
 			];
 			if (array_key_exists('value', $condition)) {
+				/** @psalm-suppress MixedAssignment JSON condition values are intentionally untyped. */
 				$entry['value'] = $condition['value'];
 			}
 			$conditions[] = $entry;

@@ -179,11 +179,10 @@ class CommentService {
 			return null;
 		}
 
-		$value = $data['stepId'];
-		if (is_int($value)) {
-			$stepId = $value;
-		} elseif (is_string($value) && preg_match('/^[0-9]+$/', $value) === 1) {
-			$stepId = (int)$value;
+		if (is_int($data['stepId'])) {
+			$stepId = $data['stepId'];
+		} elseif (is_string($data['stepId']) && preg_match('/^[0-9]+$/', $data['stepId']) === 1) {
+			$stepId = (int)$data['stepId'];
 		} else {
 			throw new ValidationException('invalid_field');
 		}

@@ -67,6 +67,7 @@ class ActivityService {
 	 */
 	private function sanitizeMetadata(array $metadata): array {
 		$clean = [];
+		/** @psalm-suppress MixedAssignment Metadata values are recursively sanitized below. */
 		foreach ($metadata as $key => $value) {
 			$key = (string)$key;
 			$lower = strtolower($key);

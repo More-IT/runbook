@@ -42,6 +42,7 @@ class Notifier implements INotifier {
 
 		$l = $this->l10nFactory->get('runbook', $languageCode);
 		$params = $notification->getSubjectParameters();
+		/** @var array<string, mixed> $params */
 		$runId = $this->intParam($params, 'runId');
 		$stepId = $this->intParam($params, 'stepId');
 		$runTitle = $this->stringParam($params, 'runTitle');
@@ -137,18 +138,22 @@ class Notifier implements INotifier {
 	 * @param array<string, mixed> $params
 	 */
 	private function intParam(array $params, string $key): int {
-		$value = $params[$key] ?? null;
+		if (!isset($params[$key]) || !is_int($params[$key])) {
+			return 0;
+		}
 
-		return is_int($value) ? $value : 0;
+		return $params[$key];
 	}
 
 	/**
 	 * @param array<string, mixed> $params
 	 */
 	private function stringParam(array $params, string $key): string {
-		$value = $params[$key] ?? '';
+		if (!isset($params[$key]) || !is_string($params[$key])) {
+			return '';
+		}
 
-		return is_string($value) ? $value : '';
+		return $params[$key];
 	}
 
 	/**

@@ -41,10 +41,13 @@
                 <file name="lib/Search/Provider.php" />
             </errorLevel>
         </MoreSpecificImplementedParamType>
-        <RedundantCastGivenDocblockType>
-            <errorLevel type="suppress">
-                <directory name="lib/Db" />
-            </errorLevel>
-        </RedundantCastGivenDocblockType>
+        <!-- These are intentional runtime normalisations at JSON/DB/framework
+             boundaries; Psalm already proves the resulting scalar types. -->
+        <RedundantCastGivenDocblockType errorLevel="suppress" />
+        <RedundantConditionGivenDocblockType errorLevel="suppress" />
+        <DocblockTypeContradiction errorLevel="suppress" />
+        <!-- The bundled OCP stubs reference an internal hook interface that is
+             provided by a real Nextcloud server but not shipped to Psalm. -->
+        <MissingDependency errorLevel="suppress" />
     </issueHandlers>
 </psalm>

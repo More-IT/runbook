@@ -16,6 +16,11 @@ class NextcloudFilesRootProvider implements FilesRootProvider {
 	) {
 	}
 
+	/**
+	 * @psalm-suppress MixedInferredReturnType Psalm cannot resolve the hook
+	 * dependency referenced by the bundled OCP IRootFolder stub.
+	 * @psalm-suppress MixedReturnStatement
+	 */
 	public function getUserFolder(string $uid): Folder {
 		return $this->rootFolder->getUserFolder($uid);
 	}

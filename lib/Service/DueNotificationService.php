@@ -187,6 +187,7 @@ class DueNotificationService {
 	 * The recipient's Nextcloud timezone, falling back to the server timezone.
 	 */
 	private function timeZoneFor(string $uid): \DateTimeZone {
+		/** @psalm-suppress DeprecatedMethod Nextcloud 33 compatibility requires this API. */
 		$timezone = $this->config->getUserValue($uid, 'core', 'timezone', '');
 		if (is_string($timezone) && $timezone !== '') {
 			try {

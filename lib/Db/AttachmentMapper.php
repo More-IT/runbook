@@ -93,6 +93,7 @@ class AttachmentMapper extends QBMapper {
 
 		$result = $qb->executeQuery();
 		$ids = [];
+		/** @psalm-suppress MixedAssignment DB scalar result is normalized to int below. */
 		while (($value = $result->fetchOne()) !== false) {
 			$ids[] = (int)$value;
 		}
@@ -128,6 +129,7 @@ class AttachmentMapper extends QBMapper {
 
 		$result = $qb->executeQuery();
 		$ids = [];
+		/** @psalm-suppress MixedAssignment DB scalar result is normalized to int below. */
 		while (($value = $result->fetchOne()) !== false) {
 			$ids[] = (int)$value;
 		}

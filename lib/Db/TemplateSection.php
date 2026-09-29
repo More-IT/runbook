@@ -122,6 +122,7 @@ class TemplateSection extends Entity {
 		}
 
 		$conditions = [];
+		/** @psalm-suppress MixedAssignment JSON condition values are intentionally untyped. */
 		foreach ($decoded as $entry) {
 			if (is_array($entry) && !array_is_list($entry)) {
 				$conditions[] = self::stringKeyed($entry);
@@ -184,6 +185,7 @@ class TemplateSection extends Entity {
 	 */
 	private static function stringKeyed(array $value): array {
 		$normalized = [];
+		/** @psalm-suppress MixedAssignment JSON values are intentionally untyped. */
 		foreach ($value as $key => $item) {
 			$normalized[(string)$key] = $item;
 		}
@@ -203,6 +205,7 @@ class TemplateSection extends Entity {
 			return [];
 		}
 		$ids = [];
+		/** @psalm-suppress MixedAssignment JSON ids are validated before use. */
 		foreach ($decoded as $id) {
 			if (is_int($id) || (is_string($id) && preg_match('/^[0-9]+$/', $id) === 1)) {
 				$ids[] = (int)$id;

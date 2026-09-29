@@ -207,7 +207,7 @@ class TemplateController extends ApiController {
 	#[OpenAPI]
 	#[FrontpageRoute(verb: 'POST', url: '/api/v1/templates/import')]
 	public function import(): JSONResponse {
-		$template = $this->templateImportService->import($this->request->getParams());
+		$template = $this->templateImportService->import($this->requestParams());
 
 		return new JSONResponse(['template' => $template->toArray()], Http::STATUS_CREATED);
 	}

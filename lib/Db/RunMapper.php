@@ -89,10 +89,10 @@ class RunMapper extends QBMapper {
 		}
 
 		$result = $qb->executeQuery();
-		$count = $result->fetchOne();
+		$count = (int)$result->fetchOne();
 		$result->closeCursor();
 
-		return (int)$count;
+		return $count;
 	}
 
 	/**
@@ -111,10 +111,10 @@ class RunMapper extends QBMapper {
 			->andWhere($qb->expr()->gte('completed_at', $qb->createNamedParameter($from, IQueryBuilder::PARAM_INT)));
 
 		$result = $qb->executeQuery();
-		$count = $result->fetchOne();
+		$count = (int)$result->fetchOne();
 		$result->closeCursor();
 
-		return (int)$count;
+		return $count;
 	}
 
 	/**
