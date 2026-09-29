@@ -237,7 +237,7 @@ A run has its own access list with two assignable roles:
 
 ## Requirements
 
-- Nextcloud 33
+- Nextcloud 33–35
 - PHP 8.2 – 8.5
 - Node.js 20, 22 or 24 (LTS)
 - npm 10 or 11
@@ -1788,7 +1788,7 @@ typed number comparison):
 ## Release
 
 - **Version:** 1.0.0 public source release (`appinfo/info.xml`, `package.json`).
-- **Nextcloud:** 33.
+- **Nextcloud:** 33–35.
 - **PHP:** 8.2 – 8.5.
 - **Databases:** MySQL/MariaDB, PostgreSQL and SQLite.
 - **License:** AGPL-3.0-or-later.
@@ -1908,7 +1908,8 @@ secrets and editor settings.
 Live verification was completed against a disposable Docker environment for the
 v0.3.0 milestone:
 
-- image `nextcloud:33-apache` (Nextcloud 33.0.9, PHP 8.4, SQLite);
+- images `nextcloud:33-apache` (33.0.9), `nextcloud:34-apache` (34.0.4) and
+  `nextcloud:35-apache` (35.0.1), all with SQLite;
 - the packaged app (not the development tree) was installed into
   `custom_apps/runbook`;
 - enabling the app applied all migrations and created all thirteen tables;

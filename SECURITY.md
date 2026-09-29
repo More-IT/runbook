@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-Runbook targets Nextcloud 33 on PHP 8.2 – 8.5. Security fixes are applied to the
-latest release line.
+Runbook targets Nextcloud 33–35 on PHP 8.2–8.5. Security fixes are applied to
+the latest release line.
 
 ## Reporting a vulnerability
 

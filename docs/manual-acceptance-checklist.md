@@ -1,4 +1,4 @@
-# Runbook release candidate — manual acceptance checklist
+# Runbook 1.0.0 — manual acceptance checklist
 
 This checklist is for the **real-Nextcloud production acceptance test** of the
 release candidate. It covers the 0.4.0 UX redesign and template import/export
@@ -6,9 +6,9 @@ release candidate. It covers the 0.4.0 UX redesign and template import/export
 must be executed manually on a packaged build; **nothing here is marked as passed
 by the automated suite**, and no item may be ticked without being observed.
 
-The application version for this candidate is **0.5.0** (`appinfo/info.xml`,
-`package.json`); the 0.5.0 Nextcloud Files integration is packaged as a release
-candidate and is **not** production-verified. Verify in the package that
+The application version for this candidate is **1.0.0** (`appinfo/info.xml`,
+`package.json`); the 0.5.0 Nextcloud Files integration is included in the public
+source release but is **not** production-verified. Verify in the package that
 `appinfo/info.xml` and `package.json` report the intended version **before** this
 checklist is run. If the packaged version differs from the intended candidate,
 stop and rebuild the package.
@@ -20,7 +20,7 @@ version, Nextcloud version, PHP version, database, browser and OS, and the date.
 ## 0. Setup
 
 - [ ] Build the release archive from an **identified and reproducible source state**: either a specific commit hash, or a complete source manifest/diff with SHA-256 hashes that **includes untracked files** (`git status --short` alone is not sufficient, because it does not capture the content of untracked files). A clean tree is not required as long as the state is fully recorded and reproducibly rebuildable.
-- [ ] Record the archive SHA-256 and the **packaged app version**; confirm it is the intended 0.5.0 release candidate.
+- [ ] Record the archive SHA-256 and the **packaged app version**; confirm it is the intended 1.0.0 release.
 - [ ] Install/enable `runbook` on the test instance and confirm the installed version matches the recorded package version.
 - [ ] Run the database migrations and confirm no errors on an upgrade from a previous version.
 - [ ] Seed at least one user, one group, and an admin account that is **not** a template owner.

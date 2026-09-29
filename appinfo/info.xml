@@ -47,7 +47,7 @@ Runbook is designed to be useful for IT, operations, HR, finance, quality, secur
     <category>tools</category>
     <bugs>https://github.com/More-IT/runbook/issues</bugs>
     <dependencies>
-        <nextcloud min-version="33" max-version="33"/>
+        <nextcloud min-version="33" max-version="35"/>
         <php min-version="8.2" max-version="8.5"/>
         <database>mysql</database>
         <database>pgsql</database>

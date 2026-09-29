@@ -41,6 +41,7 @@ $includeFiles = [
 	'docs/manual-acceptance-checklist.md',
 	'docs/folder-model.md',
 	'docs/official-1.0.0-readiness.md',
+	'docs/release-validation-2026-09-29.md',
 ];
 
 removeDirectory($stagingParent);

@@ -3,6 +3,9 @@
 This is the internal milestone for making Runbook a public GitHub project and
 preparing it for a future Nextcloud App Store submission.
 
+Evidence from the current validation pass is recorded in
+[`docs/release-validation-2026-09-29.md`](release-validation-2026-09-29.md).
+
 ## Completed in this milestone
 
 - [x] Version aligned to `1.0.0` in `appinfo/info.xml` and `package.json`.
@@ -16,13 +19,22 @@ preparing it for a future Nextcloud App Store submission.
 
 ## Required before App Store submission
 
-- [ ] Confirm the supported Nextcloud range against the current App Store
-      compatibility requirement and test every declared major version.
-- [ ] Add a complete OpenAPI contract for the public API, or document and
-      justify the chosen API documentation strategy.
+- [x] Confirm and test the declared runtime range: Nextcloud 33–35 was
+      installed from the packaged build and passed the real-instance smoke
+      checks; Nextcloud 36 remains pending until an image/release is available.
+- [ ] Confirm that Nextcloud App Store approval accepts the declared range
+      against its current latest-release-plus-one policy before submission.
+- [ ] Add a complete OpenAPI contract for the public API. The current API uses
+      legacy JSON controllers and hand-written `appinfo/routes.php`; official
+      extraction requires an OCS/typed-controller decision, Psalm coverage and
+      a generated spec that is checked for drift in CI.
 - [ ] Run acceptance tests on a real supported Nextcloud instance, including
       Files mounts, permissions, migrations, background jobs and upgrades.
-- [ ] Review uninstall, downgrade and upgrade behaviour on real instances.
+- [x] Verify on a disposable Nextcloud 33 instance that 0.5.0 → 1.0.0
+      upgrade succeeds, uninstall removes app files while retaining the app
+      tables, and re-enable succeeds. Downgrade was observed to be accepted by
+      `occ upgrade`; this remains a documented compatibility decision, not an
+      unqualified production guarantee.
 - [ ] Request an app signing certificate and keep the private key outside Git.
 - [ ] Build a clean release archive, sign it, and validate the archive rather
       than only the development checkout.
