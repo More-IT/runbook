@@ -10,7 +10,9 @@ use OCA\Runbook\Service\RunDestinationResolver;
 use OCA\Runbook\Service\TemplateCreationPolicyService;
 use OCA\Runbook\Service\ValidationException;
 use OCP\AppFramework\Http;
+use OCP\AppFramework\Http\Attribute\FrontpageRoute;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
+use OCP\AppFramework\Http\Attribute\OpenAPI;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IGroupManager;
 use OCP\IRequest;
@@ -38,8 +40,14 @@ class AdminSettingsController extends ApiController {
 	}
 
 	/**
+	 * Read administration settings.
+	 *
 	 * @return JSONResponse<Http::STATUS_OK, array{settings: array<string, mixed>, bounds: array<string, int>, destination: array<string, mixed>}, array{}>
+	 *
+	 * 200: Administration settings returned
 	 */
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'GET', url: '/api/v1/admin/settings')]
 	public function index(): JSONResponse {
 		return new JSONResponse([
 			'settings' => $this->settings->getAll(),
@@ -49,8 +57,14 @@ class AdminSettingsController extends ApiController {
 	}
 
 	/**
+	 * Update administration settings.
+	 *
 	 * @return JSONResponse<Http::STATUS_OK, array{settings: array<string, mixed>, bounds: array<string, int>}, array{}>
+	 *
+	 * 200: Administration settings updated
 	 */
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'PUT', url: '/api/v1/admin/settings')]
 	public function update(): JSONResponse {
 		$data = $this->body(array_keys($this->settings->getDefaults()));
 		$updated = $this->settings->update($data);
@@ -69,13 +83,21 @@ class AdminSettingsController extends ApiController {
 	 * identity is captured there. A failed save never changes the stored
 	 * reference.
 	 *
+	 * @param string $path Destination path.
 	 * @return JSONResponse<Http::STATUS_OK, array{destination: array<string, mixed>}, array{}>
+	 *
+	 * 200: Destination saved
 	 */
-	public function updateDestination(): JSONResponse {
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'PUT', url: '/api/v1/admin/settings/destination')]
+	public function updateDestination(?string $path = null): JSONResponse {
 		$uid = $this->currentUserId();
-		$path = $this->request->getParam('path');
-		if (!is_string($path)) {
-			throw new ValidationException('invalid_field');
+		if ($path === null) {
+			$value = $this->param('path');
+			if (!is_string($value)) {
+				throw new ValidationException('invalid_field');
+			}
+			$path = $value;
 		}
 
 		$reference = $this->destinations->captureReference($uid, $path);
@@ -94,7 +116,11 @@ class AdminSettingsController extends ApiController {
 	 * explicit unset state and the #46 default behaviour.
 	 *
 	 * @return JSONResponse<Http::STATUS_OK, array{destination: array<string, mixed>}, array{}>
+	 *
+	 * 200: Destination cleared
 	 */
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'DELETE', url: '/api/v1/admin/settings/destination')]
 	public function clearDestination(): JSONResponse {
 		$this->settings->clearDestinationReference();
 
@@ -105,8 +131,12 @@ class AdminSettingsController extends ApiController {
 	 * Feature flags that affect the main application UI.
 	 *
 	 * @return JSONResponse<Http::STATUS_OK, array{features: array<string, mixed>}, array{}>
+	 *
+	 * 200: Feature flags returned
 	 */
 	#[NoAdminRequired]
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'GET', url: '/api/v1/features')]
 	public function features(): JSONResponse {
 		$uid = $this->currentUserId();
 

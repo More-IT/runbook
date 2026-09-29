@@ -58,6 +58,7 @@
         "phpstan": "phpstan analyse --memory-limit=1G",
         "psalm": "psalm --threads=1 --no-cache",
         "openapi": "generate-spec",
+        "openapi:check": "composer openapi -- . openapi.json && git diff --exit-code -- openapi.json",
         "rector": "rector",
         "test": "phpunit",
         "test:unit": "phpunit --testsuite unit",

@@ -6,6 +6,8 @@ namespace OCA\Runbook\Controller;
 
 use OCA\Runbook\Service\LegacyMigrationService;
 use OCP\AppFramework\Http;
+use OCP\AppFramework\Http\Attribute\FrontpageRoute;
+use OCP\AppFramework\Http\Attribute\OpenAPI;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
 
@@ -25,8 +27,14 @@ class MigrationController extends ApiController {
 	}
 
 	/**
+	 * Read migration status.
+	 *
 	 * @return JSONResponse<Http::STATUS_OK, array{migration: array<string, mixed>}, array{}>
+	 *
+	 * 200: Migration status returned
 	 */
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'GET', url: '/api/v1/admin/migration')]
 	public function index(): JSONResponse {
 		return new JSONResponse(['migration' => $this->migration->status()]);
 	}
@@ -35,7 +43,11 @@ class MigrationController extends ApiController {
 	 * Run one bounded migration batch now, then return the updated status.
 	 *
 	 * @return JSONResponse<Http::STATUS_OK, array{result: array<string, mixed>, migration: array<string, mixed>}, array{}>
+	 *
+	 * 200: Migration completed
 	 */
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'POST', url: '/api/v1/admin/migration')]
 	public function run(): JSONResponse {
 		$result = $this->migration->migrateAll();
 

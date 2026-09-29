@@ -4,19 +4,21 @@ declare(strict_types=1);
 
 namespace OCA\Runbook\Controller;
 
-use OCA\Runbook\Db\RunSection;
 use OCA\Runbook\Db\RunStep;
+use OCA\Runbook\ResponseDefinitions;
 use OCA\Runbook\Service\RunService;
 use OCP\AppFramework\Http;
+use OCP\AppFramework\Http\Attribute\FrontpageRoute;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
+use OCP\AppFramework\Http\Attribute\OpenAPI;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
 
 /**
  * JSON endpoint for editing a run section's notes and returning its steps.
  *
- * @phpstan-import-type RunSectionData from RunSection
- * @phpstan-import-type RunStepData from RunStep
+ * @psalm-import-type RunbookRunSectionData from ResponseDefinitions
+ * @psalm-import-type RunbookRunStepData from ResponseDefinitions
  */
 class RunSectionController extends ApiController {
 	public function __construct(
@@ -28,9 +30,15 @@ class RunSectionController extends ApiController {
 	}
 
 	/**
-	 * @return JSONResponse<Http::STATUS_OK, array{section: RunSectionData}, array{}>
+	 * Update a run section.
+	 *
+	 * @return JSONResponse<Http::STATUS_OK, array{section: RunbookRunSectionData}, array{}>
+	 *
+	 * 200: Section updated
 	 */
 	#[NoAdminRequired]
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'PATCH', url: '/api/v1/run-sections/{id}')]
 	public function update(): JSONResponse {
 		$section = $this->runService->updateSectionNotes(
 			$this->requireId('id'),
@@ -41,9 +49,15 @@ class RunSectionController extends ApiController {
 	}
 
 	/**
-	 * @return JSONResponse<Http::STATUS_OK, array{steps: list<RunStepData>}, array{}>
+	 * Return a section to its previous state.
+	 *
+	 * @return JSONResponse<Http::STATUS_OK, array{steps: list<RunbookRunStepData>}, array{}>
+	 *
+	 * 200: Section returned
 	 */
 	#[NoAdminRequired]
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'POST', url: '/api/v1/run-sections/{id}/return')]
 	public function returnSection(): JSONResponse {
 		$steps = $this->runService->returnSection($this->requireId('id'), $this->body(['reason']));
 

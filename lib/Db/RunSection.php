@@ -21,7 +21,7 @@ use OCP\DB\Types;
  * @method int getPosition()
  * @method void setPosition(int $position)
  *
- * @phpstan-type RunSectionData array{
+ * @psalm-type RunSectionData array{
  *     id: int,
  *     runId: int,
  *     sourceSectionId: int|null,

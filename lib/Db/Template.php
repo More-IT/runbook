@@ -36,7 +36,7 @@ use OCP\DB\Types;
  * @method string|null getDestinationConfiguredBy()
  * @method void setDestinationConfiguredBy(?string $destinationConfiguredBy)
  *
- * @phpstan-type TemplateData array{
+ * @psalm-type TemplateData array{
  *     id: int,
  *     uuid: string,
  *     title: string,

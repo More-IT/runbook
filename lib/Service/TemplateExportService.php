@@ -18,7 +18,7 @@ use OCA\Runbook\Db\TemplateStep;
  * Reading is enforced through {@see TemplateService} (the same view permission
  * as the detail endpoint); exporting never writes.
  *
- * @phpstan-type ExportSection array{
+ * @psalm-type ExportSection array{
  *     ref: string,
  *     title: string,
  *     description: string,
@@ -26,7 +26,7 @@ use OCA\Runbook\Db\TemplateStep;
  *     dependsOn: list<string>,
  *     conditions: list<array{stepRef: string, operator: string, value?: mixed}>
  * }
- * @phpstan-type ExportStep array{
+ * @psalm-type ExportStep array{
  *     ref: string,
  *     sectionRef: string,
  *     title: string,
@@ -38,7 +38,7 @@ use OCA\Runbook\Db\TemplateStep;
  *     defaultAssignee: string|null,
  *     dueOffset: string|null
  * }
- * @phpstan-type ExportDocument array{
+ * @psalm-type ExportDocument array{
  *     format: string,
  *     schemaVersion: int,
  *     template: array{title: string, description: string},

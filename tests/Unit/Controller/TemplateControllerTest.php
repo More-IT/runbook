@@ -10,6 +10,7 @@ use OCA\Runbook\Service\ForbiddenException;
 use OCA\Runbook\Service\TemplateExportService;
 use OCA\Runbook\Service\TemplateImportService;
 use OCA\Runbook\Service\TemplateService;
+use OCP\AppFramework\Http\Attribute\FrontpageRoute;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -136,23 +137,19 @@ class TemplateControllerTest extends TestCase {
 		$this->controller(['format' => 'runbook-template'])->import();
 	}
 
-	public function testImportRouteIsRegisteredBeforeTheIdentifierRoute(): void {
-		/** @var array{routes: list<array{name: string, url: string, verb: string}>} $routes */
-		$routes = require __DIR__ . '/../../../appinfo/routes.php';
-		$names = array_column($routes['routes'], 'name');
-		$importIndex = array_search('template#import', $names, true);
-		$showIndex = array_search('template#show', $names, true);
+	public function testImportRouteIsDeclaredWithTheOfficialRouteAttribute(): void {
+		$import = new \ReflectionMethod(TemplateController::class, 'import');
+		$show = new \ReflectionMethod(TemplateController::class, 'show');
+		$importAttributes = $import->getAttributes(FrontpageRoute::class);
+		$showAttributes = $show->getAttributes(FrontpageRoute::class);
 
-		self::assertNotFalse($importIndex, 'the import route is registered');
-		self::assertNotFalse($showIndex, 'the show route is registered');
-		self::assertLessThan($showIndex, $importIndex, 'the static import route is registered before /templates/{id}');
-
-		foreach ($routes['routes'] as $route) {
-			if ($route['name'] === 'template#import') {
-				self::assertSame('/api/v1/templates/import', $route['url']);
-				self::assertSame('POST', $route['verb']);
-			}
-		}
+		self::assertCount(1, $importAttributes);
+		self::assertCount(1, $showAttributes);
+		self::assertSame([
+			'verb' => 'POST',
+			'url' => '/api/v1/templates/import',
+		], array_intersect_key($importAttributes[0]->newInstance()->toArray(), array_flip(['verb', 'url'])));
+		self::assertSame('/api/v1/templates/{id}', $showAttributes[0]->newInstance()->getUrl());
 	}
 
 	public function testShowIncludesDestinationState(): void {

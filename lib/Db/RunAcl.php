@@ -23,7 +23,7 @@ use OCP\DB\Types;
  * @method int getUpdatedAt()
  * @method void setUpdatedAt(int $updatedAt)
  *
- * @phpstan-type RunAclData array{
+ * @psalm-type RunAclData array{
  *     id: int,
  *     runId: int,
  *     principalType: string,

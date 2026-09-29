@@ -5,17 +5,20 @@ declare(strict_types=1);
 namespace OCA\Runbook\Controller;
 
 use OCA\Runbook\Db\ActivityEvent;
+use OCA\Runbook\ResponseDefinitions;
 use OCA\Runbook\Service\RunService;
 use OCA\Runbook\Service\ValidationException;
 use OCP\AppFramework\Http;
+use OCP\AppFramework\Http\Attribute\FrontpageRoute;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
+use OCP\AppFramework\Http\Attribute\OpenAPI;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
 
 /**
  * Read-only JSON endpoint for the append-only run activity history.
  *
- * @phpstan-import-type ActivityData from ActivityEvent
+ * @psalm-import-type RunbookActivityData from ResponseDefinitions
  */
 class ActivityController extends ApiController {
 	public function __construct(
@@ -27,18 +30,34 @@ class ActivityController extends ApiController {
 	}
 
 	/**
-	 * @return JSONResponse<Http::STATUS_OK, array{activity: list<ActivityData>}, array{}>
+	 * Return the activity history for a run
+	 *
+	 * @param int $id Run identifier.
+	 * @param int|null $limit Maximum number of events.
+	 * @param string|null $order Sort order.
+	 * @return JSONResponse<Http::STATUS_OK, array{activity: list<RunbookActivityData>}, array{}>
+	 *
+	 * 200: Activity history returned
 	 */
 	#[NoAdminRequired]
-	public function index(): JSONResponse {
-		$order = $this->request->getParam('order');
-		if ($order !== null && !is_string($order)) {
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'GET', url: '/api/v1/runs/{id}/activity')]
+	public function index(?int $id = null, ?int $limit = null, ?string $order = null): JSONResponse {
+		$id ??= $this->requireId('id');
+		$rawLimit = $this->param('limit');
+		if ($limit === null && $rawLimit !== null) {
+			$limit = is_int($rawLimit) ? $rawLimit : (is_string($rawLimit) && preg_match('/^[0-9]+$/', $rawLimit) === 1 ? (int)$rawLimit : null);
+		}
+		$rawOrder = $this->param('order');
+		if ($order === null && $rawOrder !== null) {
+			$order = is_string($rawOrder) ? $rawOrder : null;
+		}
+		if ($id < 0 || ($limit !== null && $limit < 0)) {
 			throw new ValidationException('invalid_field');
 		}
-
 		$events = array_map(
 			static fn (ActivityEvent $event): array => $event->toArray(),
-			$this->runService->listActivity($this->requireId('id'), $this->optionalInt('limit'), $order),
+			$this->runService->listActivity($id, $limit, $order),
 		);
 
 		return new JSONResponse(['activity' => $events]);

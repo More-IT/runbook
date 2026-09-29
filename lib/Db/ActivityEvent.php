@@ -23,7 +23,7 @@ use OCP\DB\Types;
  * @method int getCreatedAt()
  * @method void setCreatedAt(int $createdAt)
  *
- * @phpstan-type ActivityData array{
+ * @psalm-type ActivityData array{
  *     id: int,
  *     runId: int,
  *     stepId: int|null,

@@ -92,7 +92,7 @@ use OCP\DB\Types;
  * @method int|null getMigrationAttemptedAt()
  * @method void setMigrationAttemptedAt(?int $migrationAttemptedAt)
  *
- * @phpstan-type RunData array{
+ * @psalm-type RunData array{
  *     id: int,
  *     uuid: string,
  *     templateId: int|null,

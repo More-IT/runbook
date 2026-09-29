@@ -72,6 +72,9 @@ jobs:
       - name: Static analysis
         run: composer phpstan
 
+      - name: OpenAPI contract
+        run: composer openapi:check
+
       - name: Unit tests
         run: composer test
 

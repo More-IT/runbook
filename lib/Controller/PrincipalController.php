@@ -7,7 +7,9 @@ namespace OCA\Runbook\Controller;
 use OCA\Runbook\Service\AclService;
 use OCA\Runbook\Service\ValidationException;
 use OCP\AppFramework\Http;
+use OCP\AppFramework\Http\Attribute\FrontpageRoute;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
+use OCP\AppFramework\Http\Attribute\OpenAPI;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
 
@@ -26,21 +28,26 @@ class PrincipalController extends ApiController {
 	}
 
 	/**
+	 * Search users and groups available to the ACL editor.
+	 *
+	 * @param string $search Search term.
+	 * @param int $limit Maximum number of results.
 	 * @return JSONResponse<Http::STATUS_OK, array{principals: list<array{principalType: string, principalId: string, displayName: string}>}, array{}>
+	 *
+	 * 200: Principals returned
 	 */
 	#[NoAdminRequired]
-	public function index(): JSONResponse {
-		$search = $this->request->getParam('search', '');
-		if (!is_string($search)) {
-			throw new ValidationException('invalid_field');
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'GET', url: '/api/v1/principals')]
+	public function index(string $search = '', int $limit = self::DEFAULT_LIMIT): JSONResponse {
+		if ($search === '') {
+			$value = $this->param('search', '');
+			if (is_string($value)) {
+				$search = $value;
+			}
 		}
-
-		$limit = self::DEFAULT_LIMIT;
-		$rawLimit = $this->request->getParam('limit');
-		if (is_int($rawLimit)) {
-			$limit = $rawLimit;
-		} elseif (is_string($rawLimit) && preg_match('/^[0-9]+$/', $rawLimit) === 1) {
-			$limit = (int)$rawLimit;
+		if ($limit < 0) {
+			throw new ValidationException('invalid_field');
 		}
 
 		return new JSONResponse([

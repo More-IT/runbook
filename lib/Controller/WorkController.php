@@ -7,19 +7,21 @@ namespace OCA\Runbook\Controller;
 use OCA\Runbook\Db\Run;
 use OCA\Runbook\Db\RunSection;
 use OCA\Runbook\Db\RunStep;
-use OCA\Runbook\Service\ValidationException;
+use OCA\Runbook\ResponseDefinitions;
 use OCA\Runbook\Service\WorkService;
 use OCP\AppFramework\Http;
+use OCP\AppFramework\Http\Attribute\FrontpageRoute;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
+use OCP\AppFramework\Http\Attribute\OpenAPI;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
 
 /**
  * JSON endpoints for "My Work" and the overview counters.
  *
- * @phpstan-import-type RunData from Run
+ * @psalm-import-type RunbookRunData from ResponseDefinitions
  *
- * @phpstan-type WorkItemData array{
+ * @psalm-type RunbookWorkItemData array{
  *     runId: int,
  *     runTitle: string,
  *     runStatus: string,
@@ -47,15 +49,23 @@ class WorkController extends ApiController {
 	}
 
 	/**
-	 * @return JSONResponse<Http::STATUS_OK, array{work: list<WorkItemData>}, array{}>
+	 * Return the current user's assigned work
+	 *
+	 * @param string $filter Work filter.
+	 * @return JSONResponse<Http::STATUS_OK, array{work: list<RunbookWorkItemData>}, array{}>
+	 *
+	 * 200: Work items returned
 	 */
 	#[NoAdminRequired]
-	public function myWork(): JSONResponse {
-		$filter = $this->request->getParam('filter', 'all');
-		if (!is_string($filter)) {
-			throw new ValidationException('invalid_field');
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'GET', url: '/api/v1/my-work')]
+	public function myWork(string $filter = 'all'): JSONResponse {
+		if ($filter === 'all') {
+			$value = $this->param('filter', 'all');
+			if (is_string($value)) {
+				$filter = $value;
+			}
 		}
-
 		$work = array_map(
 			fn (array $item): array => $this->serializeWorkItem($item),
 			$this->workService->myWork($filter),
@@ -65,9 +75,15 @@ class WorkController extends ApiController {
 	}
 
 	/**
-	 * @return JSONResponse<Http::STATUS_OK, array{activeRuns: int, assignedActiveSteps: int, overdue: int, completedStepsThisMonth: int, completedRunsThisMonth: int, assignedWork: list<WorkItemData>, recentRuns: list<RunData>}, array{}>
+	 * Return overview counters and recent work
+	 *
+	 * @return JSONResponse<Http::STATUS_OK, array{activeRuns: int, assignedActiveSteps: int, overdue: int, completedStepsThisMonth: int, completedRunsThisMonth: int, assignedWork: list<RunbookWorkItemData>, recentRuns: list<RunbookRunData>}, array{}>
+	 *
+	 * 200: Overview returned
 	 */
 	#[NoAdminRequired]
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'GET', url: '/api/v1/overview')]
 	public function overview(): JSONResponse {
 		$overview = $this->workService->overview();
 
@@ -90,7 +106,7 @@ class WorkController extends ApiController {
 
 	/**
 	 * @param array{run: Run, section: RunSection, step: RunStep, overdue: bool, dueToday: bool} $item
-	 * @return WorkItemData
+	 * @return RunbookWorkItemData
 	 */
 	private function serializeWorkItem(array $item): array {
 		$run = $item['run'];

@@ -33,6 +33,15 @@ abstract class ApiController extends Controller {
 	}
 
 	/**
+	 * Read a request parameter through a helper so public controller methods can
+	 * expose typed parameters to the OpenAPI extractor while retaining the
+	 * legacy unit-test and controller invocation path.
+	 */
+	protected function param(string $name, mixed $default = null): mixed {
+		return $this->request->getParam($name, $default);
+	}
+
+	/**
 	 * Read a required, non-negative integer route parameter.
 	 */
 	protected function requireId(string $name): int {

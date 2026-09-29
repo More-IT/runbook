@@ -56,7 +56,7 @@ use OCP\DB\Types;
  * @method string|null getMigrationReason()
  * @method void setMigrationReason(?string $migrationReason)
  *
- * @phpstan-type AttachmentData array{
+ * @psalm-type AttachmentData array{
  *     id: int,
  *     uuid: string,
  *     runId: int,
@@ -69,7 +69,7 @@ use OCP\DB\Types;
  *     createdAt: int
  * }
  *
- * @phpstan-type AttachmentDataWithState array{
+ * @psalm-type AttachmentDataWithState array{
  *     id: int,
  *     uuid: string,
  *     runId: int,

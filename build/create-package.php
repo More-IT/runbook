@@ -35,6 +35,7 @@ $includeFiles = [
 	'LICENSE',
 	'SECURITY.md',
 	'CHANGELOG.md',
+	'openapi.json',
 	// Documentation linked from the packaged README; keep this list in sync with
 	// the relative links in README.md (validate-package.php checks them).
 	'docs/ux-architecture.md',

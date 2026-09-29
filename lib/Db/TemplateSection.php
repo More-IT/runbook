@@ -17,7 +17,7 @@ use OCP\DB\Types;
  * @method int getPosition()
  * @method void setPosition(int $position)
  *
- * @phpstan-type SectionData array{
+ * @psalm-type SectionData array{
  *     id: int,
  *     templateId: int,
  *     title: string,

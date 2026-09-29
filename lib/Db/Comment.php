@@ -25,7 +25,7 @@ use OCP\DB\Types;
  * @method int getUpdatedAt()
  * @method void setUpdatedAt(int $updatedAt)
  *
- * @phpstan-type CommentData array{
+ * @psalm-type CommentData array{
  *     id: int,
  *     uuid: string,
  *     runId: int,

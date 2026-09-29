@@ -48,7 +48,7 @@ use OCP\DB\Types;
  * @method int|null getReopenedAt()
  * @method void setReopenedAt(?int $reopenedAt)
  *
- * @phpstan-type RunStepData array{
+ * @psalm-type RunStepData array{
  *     id: int,
  *     runSectionId: int,
  *     sourceStepId: int|null,

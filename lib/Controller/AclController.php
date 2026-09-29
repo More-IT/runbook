@@ -5,17 +5,20 @@ declare(strict_types=1);
 namespace OCA\Runbook\Controller;
 
 use OCA\Runbook\Db\TemplateAcl;
+use OCA\Runbook\ResponseDefinitions;
 use OCA\Runbook\Service\AclService;
 use OCA\Runbook\Service\ValidationException;
 use OCP\AppFramework\Http;
+use OCP\AppFramework\Http\Attribute\FrontpageRoute;
 use OCP\AppFramework\Http\Attribute\NoAdminRequired;
+use OCP\AppFramework\Http\Attribute\OpenAPI;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\IRequest;
 
 /**
  * JSON endpoints for template access control lists.
  *
- * @phpstan-import-type AclData from TemplateAcl
+ * @psalm-import-type RunbookAclData from ResponseDefinitions
  */
 class AclController extends ApiController {
 	public function __construct(
@@ -27,9 +30,15 @@ class AclController extends ApiController {
 	}
 
 	/**
-	 * @return JSONResponse<Http::STATUS_OK, array{owner: string, entries: list<AclData>}, array{}>
+	 * Read a template ACL.
+	 *
+	 * @return JSONResponse<Http::STATUS_OK, array{owner: string, entries: list<RunbookAclData>}, array{}>
+	 *
+	 * 200: ACL returned
 	 */
 	#[NoAdminRequired]
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'GET', url: '/api/v1/templates/{id}/acl')]
 	public function index(): JSONResponse {
 		$result = $this->aclService->getAcl($this->requireId('id'));
 
@@ -45,9 +54,13 @@ class AclController extends ApiController {
 	/**
 	 * Replace the complete ACL of a template.
 	 *
-	 * @return JSONResponse<Http::STATUS_OK, array{owner: string, entries: list<AclData>}, array{}>
+	 * @return JSONResponse<Http::STATUS_OK, array{owner: string, entries: list<RunbookAclData>}, array{}>
+	 *
+	 * 200: ACL updated
 	 */
 	#[NoAdminRequired]
+	#[OpenAPI]
+	#[FrontpageRoute(verb: 'PUT', url: '/api/v1/templates/{id}/acl')]
 	public function update(): JSONResponse {
 		$entries = $this->body(['entries'])['entries'] ?? null;
 		if (!is_array($entries)) {

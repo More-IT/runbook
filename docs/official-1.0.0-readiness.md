@@ -26,10 +26,11 @@ Evidence from the current validation pass is recorded in
       checks; Nextcloud 36 remains pending until an image/release is available.
 - [ ] Confirm that Nextcloud App Store approval accepts the declared range
       against its current latest-release-plus-one policy before submission.
-- [ ] Add a complete OpenAPI contract for the public API. The current API uses
-      legacy JSON controllers and hand-written `appinfo/routes.php`; official
-      extraction requires an OCS/typed-controller decision, Psalm coverage and
-      a generated spec that is checked for drift in CI.
+- [x] Add and validate the OpenAPI contract for the public API. The API routes
+      now use Nextcloud's `FrontpageRoute`/`OpenAPI` attributes, shared response
+      definitions and a generated `openapi.json`; `composer openapi:check`
+      verifies the committed contract for drift in CI. The extractor currently
+      reports non-blocking summary-punctuation warnings.
 - [ ] Make the new Psalm gate pass. The first baseline run reports 442 issues,
       so enabling it in blocking CI before the typing/refactor work would be
       misleading.

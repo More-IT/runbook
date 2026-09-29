@@ -28,7 +28,7 @@ use OCP\DB\Types;
  * @method string|null getDueOffset()
  * @method void setDueOffset(?string $dueOffset)
  *
- * @phpstan-type StepData array{
+ * @psalm-type StepData array{
  *     id: int,
  *     sectionId: int,
  *     uuid: string,
