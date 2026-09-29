@@ -41,7 +41,9 @@ Evidence from the current validation pass is recorded in
       tables, and re-enable succeeds. Downgrade was observed to be accepted by
       `occ upgrade`; this remains a documented compatibility decision, not an
       unqualified production guarantee.
-- [ ] Request an app signing certificate and keep the private key outside Git.
+- [x] Submit the public CSR through the official Nextcloud certificate-request PR
+      ([#1280](https://github.com/nextcloud/app-certificate-requests/pull/1280));
+      certificate issuance is still pending. The private key remains outside Git.
 - [ ] Build a clean release archive, sign it, and validate the archive rather
       than only the development checkout.
 - [ ] Configure GitHub release automation only after the signing and App Store

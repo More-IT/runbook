@@ -71,6 +71,10 @@ created a section and step, published the template and started a run.
 - Official code-signing certificate and signed `appinfo/signature.json`.
 - GitHub release and App Store submission.
 
+The CSR was submitted to the official Nextcloud certificate-request repository
+in [PR #1280](https://github.com/nextcloud/app-certificate-requests/pull/1280).
+The PR is open and the certificate has not yet been issued.
+
 An earlier preliminary push left GitHub `main` at `fe99441`; no later
 validation commit, final `v1.0.0` tag, GitHub release or App Store action was
 performed from this validation run. The remote branch must not be treated as
