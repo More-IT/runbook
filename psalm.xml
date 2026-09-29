@@ -19,4 +19,13 @@
     <extraFiles>
         <directory name="vendor" />
     </extraFiles>
+    <issueHandlers>
+        <!-- Nextcloud instantiates controllers, settings and jobs through its
+             registration/DI containers, so Psalm cannot see these entry points
+             as ordinary PHP call sites. -->
+        <UnusedClass errorLevel="suppress" />
+        <PossiblyUnusedMethod errorLevel="suppress" />
+        <PossiblyUnusedProperty errorLevel="suppress" />
+        <PossiblyUnusedReturnValue errorLevel="suppress" />
+    </issueHandlers>
 </psalm>

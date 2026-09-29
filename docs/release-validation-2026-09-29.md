@@ -29,9 +29,10 @@ manual sign-off.
   `FrontpageRoute`/`OpenAPI` attributes and shared response definitions;
   `composer openapi:check` verifies the committed `openapi.json` for drift in
   CI. The extractor still emits non-blocking summary-punctuation warnings.
-- Psalm 5.26 was rerun with the official-style configuration and reported 447
-  issues. This is recorded as a blocking static-analysis/refactor result; no
-  baseline was created to hide the findings.
+- Psalm 5.26 was rerun with explicit suppressions only for Nextcloud's dynamic
+  framework entry points and reported 244 remaining issues. This is recorded as
+  a blocking static-analysis/refactor result; no baseline was created to hide
+  the findings.
 
 ## Real Nextcloud runtime smoke tests
 
