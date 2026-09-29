@@ -27,5 +27,24 @@
         <PossiblyUnusedMethod errorLevel="suppress" />
         <PossiblyUnusedProperty errorLevel="suppress" />
         <PossiblyUnusedReturnValue errorLevel="suppress" />
+        <!-- Database entities are hydrated by Nextcloud after construction and
+             several migration/search interfaces intentionally widen arrays in
+             their upstream signatures. -->
+        <PropertyNotSetInConstructor>
+            <errorLevel type="suppress">
+                <directory name="lib/Db" />
+            </errorLevel>
+        </PropertyNotSetInConstructor>
+        <MoreSpecificImplementedParamType>
+            <errorLevel type="suppress">
+                <directory name="lib/Migration" />
+                <file name="lib/Search/Provider.php" />
+            </errorLevel>
+        </MoreSpecificImplementedParamType>
+        <RedundantCastGivenDocblockType>
+            <errorLevel type="suppress">
+                <directory name="lib/Db" />
+            </errorLevel>
+        </RedundantCastGivenDocblockType>
     </issueHandlers>
 </psalm>
