@@ -15,7 +15,7 @@
     "lint:style": "stylelint \"src/**/*.vue\" \"src/**/*.scss\" \"src/**/*.css\"",
     "lint:fix": "eslint src --fix",
     "typecheck": "vue-tsc --noEmit",
-    "test:frontend": "node --test tests/frontend/"
+    "test:frontend": "node --test tests/frontend/*.test.mjs"
   },
   "dependencies": {
     "@nextcloud/axios": "^2.6.0",

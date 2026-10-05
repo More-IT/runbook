@@ -708,7 +708,9 @@ class RunServiceTest extends RunTestBase {
 		usort($runSections, static fn (RunSection $a, RunSection $b): int => $a->getPosition() <=> $b->getPosition());
 		$runStepsBySource = [];
 		foreach ($this->runSteps as $runStep) {
-			$runStepsBySource[$runStep->getSourceStepId()] = $runStep;
+			$sourceStepId = $runStep->getSourceStepId();
+			self::assertNotNull($sourceStepId);
+			$runStepsBySource[$sourceStepId] = $runStep;
 		}
 
 		$conditions = $runSections[1]->getConditions();
