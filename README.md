@@ -173,7 +173,7 @@ Milestone 0.4.0 — UX redesign and template import/export (issues #26–#33):
 > [`docs/manual-acceptance-checklist.md`](docs/manual-acceptance-checklist.md).
 > Automated checks and package validation are not a substitute for that manual
 > acceptance. Template replacement and starting a run during import are **not**
-> implemented. Recurring runs, conditional steps, calendar, Talk, webhooks, API
+> implemented. Recurring runs, step-level conditions, calendar, Talk, webhooks, API
 > tokens, automation and AI are **not** implemented either.
 
 ## ACL roles and permissions
@@ -238,7 +238,7 @@ A run has its own access list with two assignable roles:
 
 ## Requirements
 
-- Nextcloud 33–35
+- Nextcloud 33
 - PHP 8.2 – 8.5
 - Node.js 20, 22 or 24 (LTS)
 - npm 10 or 11
@@ -695,7 +695,6 @@ rendered as HTML or Markdown.
 - Mentions use `@userid`. Only mentions of existing Nextcloud users are stored; a
   maximum of 50 mentions per comment. Unknown usernames are ignored. Mentions
   never grant access to a run.
-- No notifications are sent for mentions in this milestone.
 
 ## Evidence attachments
 
